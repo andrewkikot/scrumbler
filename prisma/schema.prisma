@@ -1,0 +1,118 @@
+// Scrumbler — planning poker + daily-lead wheel
+// Neon Postgres via the Prisma Neon driver adapter.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// A permanent, shareable room. `slug` is the public URL; `adminToken` is the
+/// private capability that grants settings/wheel/round control.
+model Room {
+  id         String @id @default(cuid())
+  slug       String @unique
+  name       String
+  adminToken String @unique
+
+  // --- planning poker settings (admin tweakable) ---
+  deckKey     String  @default("fibonacci")
+  customDeck  String? // comma-separated, only read when deckKey == "custom"
+  autoReveal  Boolean @default(true)
+  allowRevote Boolean @default(true)
+  showAverage Boolean @default(true)
+  allowSpectatorVote Boolean @default(false)
+
+  /// Monotonic counter bumped by every mutation. The SSE stream watches this
+  /// single column so a poll costs one tiny indexed read.
+  version Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants Participant[]
+  rounds       Round[]
+  wheelEntries WheelEntry[]
+  spins        Spin[]
+
+  @@index([updatedAt])
+}
+
+/// Someone in the room. Identified by a browser-generated `clientId` — no auth.
+model Participant {
+  id          String   @id @default(cuid())
+  roomId      String
+  name        String
+  clientId    String
+  isSpectator Boolean  @default(false)
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  room  Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  votes Vote[]
+
+  @@unique([roomId, clientId])
+  @@index([roomId, lastSeenAt])
+}
+
+/// One estimation round. A room always has exactly one "current" round: the
+/// highest `number`.
+model Round {
+  id         String    @id @default(cuid())
+  roomId     String
+  number     Int
+  topic      String?
+  revealed   Boolean   @default(false)
+  revealedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  room  Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  votes Vote[]
+
+  @@unique([roomId, number])
+  @@index([roomId, number(sort: Desc)])
+}
+
+model Vote {
+  id            String   @id @default(cuid())
+  roundId       String
+  participantId String
+  value         String
+  createdAt     DateTime @default(now())
+
+  round       Round       @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, participantId])
+  @@index([roundId])
+}
+
+/// A name on the daily-lead wheel. Deliberately NOT tied to Participant:
+/// the admin can seed the wheel with teammates who have not opened the room.
+model WheelEntry {
+  id       String   @id @default(cuid())
+  roomId   String
+  label    String
+  active   Boolean  @default(true)
+  position Int      @default(0)
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, label])
+  @@index([roomId, position])
+}
+
+/// History of wheel results, so "who led last time" survives a refresh.
+model Spin {
+  id         String   @id @default(cuid())
+  roomId     String
+  winnerLabel String
+  createdAt  DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt(sort: Desc)])
+}
