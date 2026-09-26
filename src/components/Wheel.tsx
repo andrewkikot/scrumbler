@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SPIN_DURATION_MS, type SpinView, type WheelEntryView } from '@/lib/types';
 import {
-  droppedWinnerIndex,
+  droppedIndex,
   segmentCenter,
   segmentUnderPointer,
   spinProgress,
@@ -160,7 +160,7 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
   const pointerRef = useRef<HTMLDivElement>(null);
   const rotationRef = useRef(0);
   const settledRef = useRef<string | null>(null);
-  /** The spin whose winner has already been dropped — a wedge falls once. */
+  /** The entry whose wedge has already fallen — a wedge falls once. */
   const droppedRef = useRef<string | null>(null);
   /** Which label span carries the accent styles, so we know what to clear. */
   const accentedLabelRef = useRef(-1);
@@ -186,6 +186,12 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
    */
   const [layout, setLayout] = useState<WheelEntryView[]>(() => entries.filter((e) => e.active));
   const [drop, setDrop] = useState<{ index: number; startedAt: number } | null>(null);
+  /**
+   * The spin the wheel is currently flying along, if any. State rather than a
+   * ref because the roster is held back while it is set, and letting go has to
+   * re-run the effect that does the holding.
+   */
+  const [animating, setAnimating] = useState<string | null>(null);
 
   // Primitives, not objects: the stream hands us a fresh `spin` object on every
   // frame and the animation must not read that as a new spin.
@@ -203,22 +209,28 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
     const active = entries.filter((e) => e.active);
     if (active.map((e) => `${e.id}:${e.label}`).join(',') === layoutSignature) return;
 
-    // Exactly the person who just won has left the wheel — play the drop.
-    // `droppedRef` matters: the held layout still looks droppable on the render
-    // right after the wedge lands, and without it the fall would loop.
-    const justWon = spinId !== null && settledRef.current === spinId;
-    if (!drop && justWon && droppedRef.current !== spinId) {
-      const falling = droppedWinnerIndex(layout, active, winnerLabel);
-      if (falling >= 0) {
-        droppedRef.current = spinId;
-        setDrop({ index: falling, startedAt: Date.now() });
-        return;
-      }
+    if (drop) return; // hold everything until the wedge has finished falling
+    // Nothing may change under a turning wheel: the segment count is baked
+    // into the arc it is flying along, and the names are printed on it. A
+    // change that lands mid-spin waits for the wheel to stop, then plays.
+    if (animating !== null) return;
+
+    // Somebody has left the wheel — the winner benched after a spin, or a name
+    // the admin dropped by hand. Either way the wedge falls out before the
+    // rest close the gap. `droppedRef` matters: the held layout still looks
+    // droppable on the render right after the wedge lands, and without it the
+    // fall would loop.
+    const falling = droppedIndex(layout, active);
+    if (falling >= 0 && droppedRef.current !== layout[falling].id) {
+      droppedRef.current = layout[falling].id;
+      setDrop({ index: falling, startedAt: Date.now() });
+      return;
     }
 
-    if (drop) return; // hold everything until the wedge has finished falling
+    // Cleared on the way past, so the same name can be dropped again later.
+    droppedRef.current = null;
     setLayout(active);
-  }, [entries, layout, layoutSignature, drop, spinId, winnerLabel]);
+  }, [entries, layout, layoutSignature, drop, animating]);
 
   const palette = useMemo(() => {
     const colors = layout.map((_, i) => SEGMENT_COLORS[i % SEGMENT_COLORS.length]);
@@ -388,6 +400,8 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
     if (spinId === null || winnerLabel === null || winnerIndex < 0) {
       paint(rotationRef.current, null);
       paintPointer(0, 0);
+      // Whatever the roster is waiting to do, it is not waiting on this.
+      setAnimating(null);
       return;
     }
 
@@ -403,6 +417,7 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
     const { from, target } = arcRef.current;
     const atRest: Accent = { index: winnerIndex, offset: POP_PX, dissolve: 0 };
     const settle = (fresh: boolean) => {
+      setAnimating(null);
       if (settledRef.current === spinId) return;
       settledRef.current = spinId;
       settledCallback.current?.({ spinId, winnerLabel, fresh });
@@ -420,6 +435,8 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
       settle(!over);
       return;
     }
+
+    setAnimating(spinId);
 
     const travel = target - from;
     // Where the wheel actually is right now, which is `from` on a fresh spin

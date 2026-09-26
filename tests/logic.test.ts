@@ -4,7 +4,7 @@ import { cardFontSize, DECKS, numericValue, resolveDeck } from '../src/lib/decks
 import { slugifyName } from '../src/lib/ids';
 import { computeStats } from '../src/lib/stats';
 import {
-  droppedWinnerIndex,
+  droppedIndex,
   restAngle,
   segmentCenter,
   segmentUnderPointer,
@@ -232,7 +232,7 @@ describe('wheel geometry', () => {
   });
 });
 
-describe('dropping the winner off the wheel', () => {
+describe('dropping a name off the wheel', () => {
   const wheel = [
     { id: 'a', label: 'Ana' },
     { id: 'b', label: 'Bo' },
@@ -240,27 +240,35 @@ describe('dropping the winner off the wheel', () => {
   ];
   const without = (id: string) => wheel.filter((e) => e.id !== id);
 
-  it('finds the wedge when the winner is the one benched', () => {
-    assert.equal(droppedWinnerIndex(wheel, without('b'), 'Bo'), 1);
-    assert.equal(droppedWinnerIndex(wheel, without('a'), 'Ana'), 0);
-  });
-
-  it('ignores anybody else leaving the wheel', () => {
-    assert.equal(droppedWinnerIndex(wheel, without('c'), 'Bo'), -1);
+  /** Whoever took them off: the spin's winner, or the admin by hand. */
+  it('finds the wedge whoever has left, wherever they sat', () => {
+    assert.equal(droppedIndex(wheel, without('a')), 0);
+    assert.equal(droppedIndex(wheel, without('b')), 1);
+    assert.equal(droppedIndex(wheel, without('c')), 2);
   });
 
   it('ignores names arriving, and two changes at once', () => {
-    assert.equal(droppedWinnerIndex(wheel, [...wheel, { id: 'd' }], 'Bo'), -1);
-    assert.equal(droppedWinnerIndex(wheel, [{ id: 'a' }], 'Bo'), -1);
+    assert.equal(droppedIndex(wheel, [...wheel, { id: 'd', label: 'Dee' }]), -1);
+    assert.equal(droppedIndex(wheel, [{ id: 'a', label: 'Ana' }]), -1);
+    assert.equal(droppedIndex(wheel, wheel), -1);
   });
 
-  it('needs a spin to have happened at all', () => {
-    assert.equal(droppedWinnerIndex(wheel, without('b'), null), -1);
+  /** A rename riding along with the bench is not a clean drop. */
+  it('will not call a rename a drop', () => {
+    const renamed = [
+      { id: 'a', label: 'Anastasia' },
+      { id: 'c', label: 'Kim' },
+    ];
+    assert.equal(droppedIndex(wheel, renamed), -1);
   });
 
-  /** A rename that also benches must not be mistaken for the winner's wedge. */
-  it('matches on the label, not just the count', () => {
-    assert.equal(droppedWinnerIndex(wheel, without('b'), 'Kim'), -1);
+  /** A reorder changes which wedge is which, so the wheel must just redraw. */
+  it('will not call a reorder a drop', () => {
+    assert.equal(droppedIndex(wheel, [without('b')[1], without('b')[0]]), -1);
+  });
+
+  it('drops the last name on the wheel', () => {
+    assert.equal(droppedIndex([{ id: 'a', label: 'Ana' }], []), 0);
   });
 });
 

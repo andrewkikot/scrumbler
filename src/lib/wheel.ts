@@ -40,22 +40,35 @@ export function segmentUnderPointer(rotation: number, count: number): number {
 }
 
 /**
- * Which wedge of `layout` is the winner being dropped off the wheel, or -1 if
- * this roster change is something else entirely (a name added, someone else
- * benched, two changes at once).
+ * Which wedge of `layout` has just left the wheel, or -1 if this roster
+ * change is something else (a name added, a rename, two changes at once).
  *
- * It is the one case where the drawn wheel has to lag behind the roster: the
- * wedge must fall out before the remaining names close the gap.
+ * Whoever took them off and for whatever reason — the winner benched after a
+ * spin, or the admin dropping somebody by hand — one name leaving is the one
+ * case where the drawn wheel has to lag behind the roster: the wedge must fall
+ * out before the remaining names close the gap.
  */
-export function droppedWinnerIndex(
+export function droppedIndex(
   layout: { id: string; label: string }[],
-  active: { id: string }[],
-  winnerLabel: string | null,
+  active: { id: string; label: string }[],
 ): number {
-  if (!winnerLabel || active.length !== layout.length - 1) return -1;
-  const gone = layout.filter((entry) => !active.some((a) => a.id === entry.id));
-  if (gone.length !== 1 || gone[0].label !== winnerLabel) return -1;
-  return layout.indexOf(gone[0]);
+  if (active.length !== layout.length - 1) return -1;
+
+  // Walk the two lists in step. Anything but a single clean omission — a
+  // rename riding along, a reorder, a swap — is not a drop, and the wheel is
+  // better off simply redrawing.
+  let missing = -1;
+  for (let i = 0, j = 0; i < layout.length; i += 1) {
+    const here = layout[i];
+    const there = active[j];
+    if (there && there.id === here.id && there.label === here.label) {
+      j += 1;
+      continue;
+    }
+    if (missing >= 0) return -1;
+    missing = i;
+  }
+  return missing;
 }
 
 /** Fraction of the spin spent loading the spring before anything launches. */

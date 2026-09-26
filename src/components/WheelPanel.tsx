@@ -29,6 +29,15 @@ export function WheelPanel({ room }: { room: RoomController }) {
 
   const spinning = state.spin !== null && settled?.id !== state.spin.id;
   const announced = state.spin && settled?.id === state.spin.id ? settled.winner : null;
+  /**
+   * The winner's entry, while they are still on the wheel — so the admin can
+   * drop them by hand when the automatic drop is switched off, or put them
+   * back and drop somebody else. It disappears of its own accord the moment
+   * they leave the wheel, whichever way they went.
+   */
+  const announcedEntry = announced
+    ? (state.wheel.find((e) => e.active && e.label === announced) ?? null)
+    : null;
 
   /**
    * Benching happens here rather than in the spin route: the winner has to stay
@@ -78,6 +87,16 @@ export function WheelPanel({ room }: { room: RoomController }) {
               <p className="font-display text-[30px] leading-tight text-[color:var(--color-gold)]">
                 {announced}
               </p>
+              {isAdmin && announcedEntry && (
+                <button
+                  type="button"
+                  className="px-btn px-btn-sm mt-2"
+                  onClick={() => void room.updateWheelEntry(announcedEntry.id, { active: false })}
+                  aria-label={`Drop ${announced} off the wheel`}
+                >
+                  Drop off the wheel
+                </button>
+              )}
             </div>
           ) : state.spin ? (
             <div>
@@ -121,7 +140,7 @@ export function WheelPanel({ room }: { room: RoomController }) {
                   onChange={(e) => setDropWinner(e.target.checked)}
                   className="h-4 w-4 accent-[color:var(--color-gold)]"
                 />
-                Drop winner off the wheel
+                Drop the winner automatically
               </label>
             </div>
           </div>
@@ -160,8 +179,13 @@ export function WheelPanel({ room }: { room: RoomController }) {
                         type="button"
                         className="px-btn px-btn-sm"
                         onClick={() => void room.updateWheelEntry(entry.id, { active: !entry.active })}
+                        aria-label={
+                          entry.active
+                            ? `Drop ${entry.label} off the wheel`
+                            : `Put ${entry.label} back on the wheel`
+                        }
                       >
-                        {entry.active ? 'Bench' : 'Add back'}
+                        {entry.active ? 'Drop' : 'Add back'}
                       </button>
                       <button
                         type="button"
