@@ -125,12 +125,12 @@ const LABEL_TRACK = (LABEL_IN + LABEL_OUT) / 2;
 const cqw = (px: number) => `${((px / SIZE) * 100).toFixed(2)}cqw`;
 
 /**
- * Type size for a wheel of `count` names, in whole pixels — Pixelify Sans is
- * a bitmap face rendered with smoothing off, so fractional sizes come out
- * furry.
+ * Type size for a wheel of `count` names.
  *
  * The constraint is tangential, not radial: a name is laid along its own
- * bisector, so what has to fit between the two cuts is the height of the line.
+ * bisector, so what has to fit between the two cuts is the height of the
+ * line. Whole pixels, because a wedge label is small, upright type sitting on
+ * a saturated ground and fractional sizes only blur it.
  */
 function labelFontPx(count: number): number {
   const chord = count === 1 ? Infinity : 2 * LABEL_TRACK * Math.sin(Math.PI / count);
@@ -476,7 +476,7 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
   if (layout.length === 0) {
     return (
       <div className="px-panel-sunken grid aspect-square w-full max-w-[420px] place-items-center p-8 text-center">
-        <p className="font-display text-[color:var(--color-ink-dim)]">
+        <p className="text-[color:var(--color-ink-dim)]">
           Nobody is on the wheel yet.
           <br />
           Add names to start the rotation.
@@ -552,7 +552,7 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
                   }}
                 >
                   <span
-                    className="font-display flex h-full w-full items-center justify-center font-semibold text-[#120c22]"
+                    className="flex h-full w-full items-center justify-center font-semibold text-[#120c22]"
                     style={{
                       fontSize: `${fontPx}px`,
                       lineHeight: 1,

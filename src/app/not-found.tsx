@@ -11,7 +11,7 @@ export default function NotFound() {
         <h1 className="mb-2 text-[24px]">No room at this address</h1>
         <p className="mb-6 text-[color:var(--color-ink-dim)]">
           The link may be mistyped, or the admin deleted the room. Room URLs look like
-          <span className="font-display block">/r/platform-squad</span>
+          <span className="block font-semibold text-[color:var(--color-ink)]">/r/platform-squad</span>
         </p>
         <Link href="/" className="px-btn px-btn-gold">
           Create a room

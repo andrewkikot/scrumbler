@@ -31,19 +31,19 @@ export function Results({ stats, showAverage }: ResultsProps) {
       {showAverage && (
         <dl className="mb-5 flex flex-wrap gap-3">
           <div className="px-panel-sunken min-w-[104px] flex-1 p-3">
-            <dt className="font-display text-[12px] text-[color:var(--color-ink-dim)]">Average</dt>
+            <dt className="text-[12px] font-medium text-[color:var(--color-ink-dim)]">Average</dt>
             <dd className="px-numeral text-[30px] text-[color:var(--color-gold)]">
               {stats.average === null ? '—' : format(stats.average)}
             </dd>
           </div>
           <div className="px-panel-sunken min-w-[104px] flex-1 p-3">
-            <dt className="font-display text-[12px] text-[color:var(--color-ink-dim)]">Median</dt>
+            <dt className="text-[12px] font-medium text-[color:var(--color-ink-dim)]">Median</dt>
             <dd className="px-numeral text-[30px] text-[color:var(--color-teal)]">
               {stats.median === null ? '—' : format(stats.median)}
             </dd>
           </div>
           <div className="px-panel-sunken min-w-[104px] flex-1 p-3">
-            <dt className="font-display text-[12px] text-[color:var(--color-ink-dim)]">Cards in</dt>
+            <dt className="text-[12px] font-medium text-[color:var(--color-ink-dim)]">Cards in</dt>
             <dd className="px-numeral text-[30px]">
               {stats.voted}
               <span className="text-[18px] text-[color:var(--color-ink-dim)]">/{stats.eligible}</span>

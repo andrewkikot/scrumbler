@@ -72,7 +72,7 @@ export function JoinGate({ roomName, onJoin }: JoinGateProps) {
           className="mt-1 h-4 w-4 shrink-0 accent-[color:var(--color-gold)]"
         />
         <span className="flex flex-col">
-          <span className="font-display text-[14px]">Watch only</span>
+          <span className="text-[14px] font-medium">Watch only</span>
           <span className="text-[13px] text-[color:var(--color-ink-dim)]">
             Sit at the table without being counted in the estimate.
           </span>

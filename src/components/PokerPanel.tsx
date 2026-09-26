@@ -36,12 +36,12 @@ export function PokerPanel({ room }: { room: RoomController }) {
     <div className="flex flex-col gap-6">
       <section className="px-panel flex flex-wrap items-center justify-between gap-4 p-4">
         <div className="flex min-w-0 flex-col gap-1">
-          <span className="font-display text-[13px] text-[color:var(--color-ink-dim)]">
+          <span className="text-[13px] font-medium text-[color:var(--color-ink-dim)]">
             Round {state.round.number}
           </span>
           {isAdmin ? (
             <input
-              className="px-input font-display text-[17px]"
+              className="px-input text-[17px] font-medium"
               style={{ minWidth: 240 }}
               placeholder="What are we estimating?"
               value={topic}
@@ -57,7 +57,7 @@ export function PokerPanel({ room }: { room: RoomController }) {
               aria-label="Round topic"
             />
           ) : (
-            <p className="font-display truncate text-[17px]">
+            <p className="truncate text-[17px] font-medium">
               {state.round.topic || 'No topic set'}
             </p>
           )}

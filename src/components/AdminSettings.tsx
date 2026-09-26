@@ -22,7 +22,7 @@ function Toggle({ label, hint, checked, onChange }: ToggleProps) {
         className="mt-1 h-4 w-4 shrink-0 accent-[color:var(--color-gold)]"
       />
       <span className="flex flex-col">
-        <span className="font-display text-[14px]">{label}</span>
+        <span className="text-[14px] font-medium">{label}</span>
         <span className="text-[13px] text-[color:var(--color-ink-dim)]">{hint}</span>
       </span>
     </label>

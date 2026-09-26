@@ -31,6 +31,15 @@
   --color-lime: #9ede4c;
   --color-violet: #a97bff;
 
+  /*
+   * Two faces, split by size rather than by role.
+   *
+   * The bitmap face is the identity of this app, and at 24px and up it is a
+   * pleasure. Below that it is a puzzle: smoothing is off by design, so a
+   * 12px chip or a name on a wheel wedge resolves into a handful of squares.
+   * Display type — the wordmark, headings, the name the wheel lands on —
+   * stays bitmap. Everything you are meant to *read* is set in the body face.
+   */
   --font-display: var(--font-pixelify), "Courier New", monospace;
   --font-body: var(--font-plex), ui-sans-serif, system-ui, sans-serif;
 }
@@ -131,10 +140,10 @@
     border: 3px solid var(--color-outline);
     background: var(--color-panel-hi);
     color: var(--color-ink);
-    font-family: var(--font-display);
+    font-family: var(--font-body);
     font-weight: 600;
     font-size: 14px;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.01em;
     cursor: pointer;
     box-shadow:
       inset 0 3px 0 var(--color-edge-light),
@@ -244,20 +253,19 @@
     display: block;
     margin-bottom: 8px;
     color: var(--color-ink-dim);
-    font-family: var(--font-display);
+    font-family: var(--font-body);
+    font-weight: 500;
     font-size: 13px;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
   }
 
   /*
    * Estimates are data, not decoration.
    *
-   * The bitmap face is the identity of this app and it stays on every label,
-   * heading and button — but a number is the one thing nobody should have to
-   * decode: at card sizes its 5/6, 8/B and 13/18 are a coin toss across a
-   * table. Every figure a round actually turns on — card faces, the average,
-   * the median, the tallies — is set in the body face instead, with lining
-   * tabular figures so columns line up and nothing shifts as counts change.
+   * Numbers were the first thing taken off the bitmap face — at card sizes
+   * its 5/6, 8/B and 13/18 are a coin toss across a table — and this adds
+   * what figures need beyond the face itself: lining tabular digits, so
+   * columns line up and nothing shifts as the counts change.
    */
   .px-numeral {
     font-family: var(--font-body);
@@ -334,9 +342,10 @@
     padding: 3px 8px;
     border: 2px solid var(--color-outline);
     background: var(--color-void-deep);
-    font-family: var(--font-display);
+    font-family: var(--font-body);
+    font-weight: 500;
     font-size: 12px;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
   }
 }
 

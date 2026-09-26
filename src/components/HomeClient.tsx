@@ -206,7 +206,7 @@ export function HomeClient() {
             {rooms.map((room) => (
               <li key={room.slug} className="px-panel flex items-center justify-between gap-3 p-3">
                 <Link href={`/r/${room.slug}`} className="min-w-0 flex-1">
-                  <span className="font-display block truncate text-[16px]">{room.name}</span>
+                  <span className="block truncate text-[16px] font-semibold">{room.name}</span>
                   <span className="block truncate text-[13px] text-[color:var(--color-ink-dim)]">
                     /r/{room.slug}
                   </span>

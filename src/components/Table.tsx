@@ -105,7 +105,7 @@ function Seat({ participant, revealed, isMe, canManage, onSetSpectator, onKick }
       </div>
 
       <span
-        className={`font-display max-w-full truncate text-[13px] ${
+        className={`max-w-full truncate text-[13px] font-medium ${
           isMe ? 'text-[color:var(--color-gold)]' : 'text-[color:var(--color-ink)]'
         }`}
         title={name}
