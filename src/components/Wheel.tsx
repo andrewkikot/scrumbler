@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SPIN_DURATION_MS, type SpinView, type WheelEntryView } from '@/lib/types';
 import {
   droppedWinnerIndex,
-  restAngle,
   segmentCenter,
   segmentUnderPointer,
   spinProgress,
+  spinTarget,
   turnsFor,
   windupDeg,
 } from '@/lib/wheel';
@@ -109,9 +109,33 @@ function buildLookup() {
   return { angle, band };
 }
 
-/** Labels ride the face between hub and rim, in container percentages. */
-const LABEL_INSET = `${(((HUB + 3) / SIZE) * 100).toFixed(2)}%`;
-const LABEL_WIDTH = `${(((RADIUS - RIM - HUB - 5) / SIZE) * 100).toFixed(2)}%`;
+/**
+ * Labels ride the face between hub and rim, sized in `cqw` against the wheel
+ * box so they scale with it. Percentages cannot do this job: a percentage
+ * inside `translateX` resolves against the *label's own* width, which is what
+ * used to drag every name into a heap around the hub.
+ */
+const LABEL_IN = HUB + 5;
+const LABEL_OUT = RADIUS - RIM - 4;
+/** Radial room a name has to run in, and the radius its centre line rides. */
+const LABEL_RUN = LABEL_OUT - LABEL_IN;
+const LABEL_TRACK = (LABEL_IN + LABEL_OUT) / 2;
+
+/** Canvas pixels as a share of the wheel box's width. */
+const cqw = (px: number) => `${((px / SIZE) * 100).toFixed(2)}cqw`;
+
+/**
+ * Type size for a wheel of `count` names, in whole pixels — Pixelify Sans is
+ * a bitmap face rendered with smoothing off, so fractional sizes come out
+ * furry.
+ *
+ * The constraint is tangential, not radial: a name is laid along its own
+ * bisector, so what has to fit between the two cuts is the height of the line.
+ */
+function labelFontPx(count: number): number {
+  const chord = count === 1 ? Infinity : 2 * LABEL_TRACK * Math.sin(Math.PI / count);
+  return Math.max(9, Math.min(13, Math.floor(chord)));
+}
 
 export type SpinResult = {
   spinId: string;
@@ -140,6 +164,14 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
   const droppedRef = useRef<string | null>(null);
   /** Which label span carries the accent styles, so we know what to clear. */
   const accentedLabelRef = useRef(-1);
+  /**
+   * Where the current spin set off from and where it lands.
+   *
+   * Pinned for the life of the spin: the roster stream re-runs the animation
+   * effect whenever anything on the wheel changes, and recomputing the arc
+   * from the rotation of the moment would jump the wheel mid-flight.
+   */
+  const arcRef = useRef<{ key: string; from: number; target: number } | null>(null);
 
   // The callback lands in a ref: a parent re-render must never restart a spin.
   const settledCallback = useRef(onSpinSettled);
@@ -359,7 +391,16 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
       return;
     }
 
-    const target = restAngle(winnerIndex, count, turnsFor(spinId));
+    const arcKey = `${spinId}:${count}:${winnerIndex}`;
+    if (arcRef.current?.key !== arcKey) {
+      const from = rotationRef.current;
+      arcRef.current = {
+        key: arcKey,
+        from,
+        target: spinTarget(from, winnerIndex, count, turnsFor(spinId)),
+      };
+    }
+    const { from, target } = arcRef.current;
     const atRest: Accent = { index: winnerIndex, offset: POP_PX, dissolve: 0 };
     const settle = (fresh: boolean) => {
       if (settledRef.current === spinId) return;
@@ -380,10 +421,11 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
       return;
     }
 
-    const from = rotationRef.current;
     const travel = target - from;
-    let previous = from;
-    let lastSegment = segmentUnderPointer(from, count);
+    // Where the wheel actually is right now, which is `from` on a fresh spin
+    // and wherever it had got to if this effect was restarted mid-flight.
+    let previous = rotationRef.current;
+    let lastSegment = segmentUnderPointer(previous, count);
     let flick = 0;
 
     let frame = requestAnimationFrame(function step() {
@@ -427,6 +469,7 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
   }
 
   const segment = 360 / layout.length;
+  const fontPx = labelFontPx(layout.length);
 
   return (
     <div className="relative mx-auto w-full max-w-[420px]">
@@ -458,7 +501,8 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
       </div>
 
       <div className="px-panel aspect-square p-3">
-        <div className="relative h-full w-full">
+        {/* Labels size themselves in `cqw`, so the wheel box is the container. */}
+        <div className="relative h-full w-full" style={{ containerType: 'inline-size' }}>
           <canvas
             ref={canvasRef}
             width={SIZE}
@@ -472,25 +516,36 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
           <div ref={labelsRef} className="pointer-events-none absolute inset-0" aria-hidden>
             {layout.map((entry, index) => {
               const center = index * segment + segment / 2;
+              // Names on the left half would otherwise read upside down. The
+              // flip turns the name about its own middle — it must not be
+              // folded into the outer transform, whose origin is the hub.
               const flip = center > 180;
               return (
                 <span
                   key={entry.id}
-                  className="font-display absolute left-1/2 top-1/2 flex items-center text-[11px] font-semibold text-[#120c22]"
+                  className="absolute left-1/2 top-1/2 block"
                   style={{
-                    width: LABEL_WIDTH,
-                    height: 14,
-                    marginTop: -7,
+                    width: cqw(LABEL_RUN),
+                    height: `${fontPx + 4}px`,
+                    marginTop: `-${(fontPx + 4) / 2}px`,
                     transformOrigin: '0 50%',
                     // `--pop` is driven by the animation loop: a winning name
                     // slides outward with the wedge it is printed on.
-                    transform: `rotate(${center - 90}deg) translateX(calc(${LABEL_INSET} + var(--pop, 0px)))${flip ? ' rotate(180deg)' : ''}`,
-                    justifyContent: flip ? 'flex-end' : 'flex-start',
-                    textShadow: '0 1px 0 rgba(255,255,255,.35)',
+                    transform: `rotate(${center - 90}deg) translateX(${cqw(LABEL_IN)}) translateX(var(--pop, 0px))`,
                   }}
                 >
-                  <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
-                    {entry.label}
+                  <span
+                    className="font-display flex h-full w-full items-center justify-center font-semibold text-[#120c22]"
+                    style={{
+                      fontSize: `${fontPx}px`,
+                      lineHeight: 1,
+                      transform: flip ? 'rotate(180deg)' : undefined,
+                      textShadow: '0 1px 0 rgba(255,255,255,.35)',
+                    }}
+                  >
+                    <span className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap">
+                      {entry.label}
+                    </span>
                   </span>
                 </span>
               );

@@ -5,11 +5,16 @@
  * Angles are degrees measured clockwise from 12 o'clock, where the pointer is.
  */
 
-/** How many full turns a spin takes. Derived from the id so clients agree. */
+/**
+ * How many full turns a spin takes. Derived from the id so clients agree.
+ *
+ * Kept modest: over a five-second spin, more turns than this means the launch
+ * is a blur of colour rather than a wheel you can watch.
+ */
 export function turnsFor(spinId: string): number {
   let hash = 0;
   for (let i = 0; i < spinId.length; i += 1) hash = (hash * 31 + spinId.charCodeAt(i)) >>> 0;
-  return 8 + (hash % 5);
+  return 5 + (hash % 4);
 }
 
 /** The angle a segment's centre sits at when the wheel is unrotated. */
@@ -53,23 +58,33 @@ export function droppedWinnerIndex(
 }
 
 /** Fraction of the spin spent loading the spring before anything launches. */
-export const SPIN_WINDUP = 0.07;
+export const SPIN_WINDUP = 0.06;
 
 /** How far the wheel rocks backwards during that wind-up, in degrees. */
 export const SPIN_WINDUP_DEG = 11;
 
 /**
+ * How sharply the wheel sheds speed. 2 is a wheel braked by constant friction;
+ * a little above that keeps the launch snappy without freezing the tail.
+ *
+ * Anything much higher (the quintic this used to be) dumps the whole travel in
+ * the first second and leaves the rest of the spin visually stopped — the wheel
+ * reads as broken rather than as slowing down.
+ */
+export const SPIN_DECAY = 2.4;
+
+/**
  * Fraction of the total travel covered at `t` (0…1).
  *
- * A quintic tail: the wheel throws most of its distance away in the first
- * second and then spends the rest of the spin crawling through single clacks —
- * which is what makes the last two names feel like a contest.
+ * Hard off the line, then a long, *visible* deceleration: there is still about
+ * a segment of travel left in the final second, so the last clacks are the
+ * contest rather than a wheel that has already secretly finished.
  */
 export function spinProgress(t: number): number {
   const clamped = Math.min(1, Math.max(0, t));
   if (clamped <= SPIN_WINDUP) return 0;
   const u = (clamped - SPIN_WINDUP) / (1 - SPIN_WINDUP);
-  return 1 - (1 - u) ** 5;
+  return 1 - (1 - u) ** SPIN_DECAY;
 }
 
 /**
@@ -79,4 +94,22 @@ export function spinProgress(t: number): number {
 export function windupDeg(t: number): number {
   if (t <= 0 || t >= SPIN_WINDUP) return 0;
   return SPIN_WINDUP_DEG * Math.sin((t / SPIN_WINDUP) * Math.PI);
+}
+
+/**
+ * Where to spin *to* from wherever the wheel is currently sitting.
+ *
+ * `restAngle` is an absolute angle, and a wheel that has already spun is not
+ * sitting at zero — landing on the raw value can mean a short hop, or even a
+ * run backwards into the result. This slides the landing forward by whole
+ * turns until the wheel has at least `turns` revolutions left to travel.
+ */
+export function spinTarget(from: number, index: number, count: number, turns: number): number {
+  const rest = restAngle(index, count, turns);
+  // Whole turns first, then the shortest forward hop onto an angle that puts
+  // the winner under the pointer. Every spin is then `turns` revolutions plus
+  // at most one more, whatever the wheel was left sitting at.
+  const base = from + 360 * turns;
+  const hop = (((rest - base) % 360) + 360) % 360;
+  return base + hop;
 }

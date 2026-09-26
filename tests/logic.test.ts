@@ -10,6 +10,7 @@ import {
   segmentUnderPointer,
   SPIN_WINDUP,
   spinProgress,
+  spinTarget,
   turnsFor,
   windupDeg,
 } from '../src/lib/wheel';
@@ -172,10 +173,10 @@ describe('wheel geometry', () => {
     assert.equal(turnsFor('spin-abc'), turnsFor('spin-abc'));
   });
 
-  it('always spins between 8 and 12 whole turns', () => {
+  it('always spins between 5 and 8 whole turns', () => {
     for (const id of ['a', 'bb', 'ccc', 'spin_123', 'clx9f2k4', '']) {
       const turns = turnsFor(id);
-      assert.ok(turns >= 8 && turns <= 12, `${id} gave ${turns}`);
+      assert.ok(turns >= 5 && turns <= 8, `${id} gave ${turns}`);
     }
   });
 
@@ -203,6 +204,31 @@ describe('wheel geometry', () => {
 
   it('rotates by a whole number of turns plus the segment offset', () => {
     assert.equal(restAngle(0, 4, 5), 360 * 5 - 45);
+  });
+
+  /**
+   * A wheel that has already spun is not sitting at zero, and a wheel must
+   * never wind *backwards* into its result.
+   */
+  it('always spins forwards, from wherever the wheel is resting', () => {
+    for (const count of [1, 2, 3, 5, 7, 12]) {
+      for (let index = 0; index < count; index += 1) {
+        for (const from of [0, 17.5, 359, 1234.5, 360 * 9 - 45, -500]) {
+          const turns = turnsFor(`s${index}-${count}`);
+          const target = spinTarget(from, index, count, turns);
+          const travel = target - from;
+          assert.ok(
+            travel >= 360 * turns && travel < 360 * (turns + 1),
+            `from=${from} count=${count} index=${index} travelled ${travel}`,
+          );
+          assert.equal(
+            segmentUnderPointer(target, count),
+            index,
+            `from=${from} count=${count} index=${index} landed wrong`,
+          );
+        }
+      }
+    }
   });
 });
 
@@ -256,9 +282,18 @@ describe('spin easing', () => {
     }
   });
 
-  it('spends the back half of the spin on the last of the travel', () => {
-    // The long crawl is the whole point: half the time, a sliver of the angle.
-    assert.ok(spinProgress(0.5) > 0.94, `half way through it had only ${spinProgress(0.5)}`);
+  /**
+   * Fast away, slow home — but never *stopped*. A curve that has spent 99% of
+   * its travel by half time leaves a wheel that looks frozen for seconds.
+   */
+  it('throws most of the travel early and still creeps at the end', () => {
+    const half = spinProgress(0.5);
+    assert.ok(half > 0.7, `half way through it had only ${half}`);
+    assert.ok(half < 0.9, `half way through it had already done ${half}`);
+
+    // Something is still visibly moving in the last fifth of the spin.
+    const left = 1 - spinProgress(0.8);
+    assert.ok(left > 0.005, `only ${left} of the travel was left at t=0.8`);
   });
 
   it('rocks backwards only during the wind-up, and returns to zero', () => {

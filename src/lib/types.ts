@@ -69,4 +69,4 @@ export type RoomState = {
 export const ONLINE_WINDOW_MS = 45_000;
 
 /** How long the wheel animation runs, shared by server and client. */
-export const SPIN_DURATION_MS = 7600;
+export const SPIN_DURATION_MS = 5000;
