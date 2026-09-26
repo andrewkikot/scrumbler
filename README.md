@@ -101,7 +101,8 @@ that window gets its own identity and joins as a player.
 |---|---|
 | `npm run dev` | development server |
 | `npm run build` | generate the Prisma client, then build |
-| `npm test` | logic tests (stats, decks, slugs, wheel geometry) |
+| `npm test` | unit tests (stats, decks, slugs, wheel geometry, env) |
+| `npm run smoke` | end-to-end check against a running server |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
 | `npm run db:deploy` | apply existing migrations (use this in CI and prod) |
@@ -125,13 +126,21 @@ that window gets its own identity and joins as a player.
    framework preset on Next.js.
 
 3. **Connect Neon.** In the Vercel project, go to **Storage → Connect Database →
-   Neon** (or add the two variables by hand under **Settings → Environment
-   Variables**):
+   Neon**, or add the two variables by hand under **Settings → Environment
+   Variables**:
 
    - `DATABASE_URL` — the **pooled** string
    - `DATABASE_URL_UNPOOLED` — the **direct** string
 
-   The Neon integration sets both names for you.
+   **Prefixed names work too.** If those names are already claimed — by another
+   project, or by a team-wide shared variable — Vercel prefixes them, and this
+   deployment uses `SCRUMBLER_DATABASE_URL` / `SCRUMBLER_DATABASE_URL_UNPOOLED`.
+   Either spelling is accepted; the prefixed one wins when both are present, so
+   an inherited team-level `DATABASE_URL` pointing at a different database can
+   never quietly take over. The resolution order lives in `src/lib/env.ts`.
+
+   `POSTGRES_URL` and `POSTGRES_URL_NON_POOLING` (prefixed or not) are accepted
+   as a last fallback. The other `PG*` variables Neon emits are unused.
 
 4. **Apply the schema** once, from your machine, with production credentials:
 
@@ -176,7 +185,11 @@ src/
     wheel.ts             wheel geometry
     bus.ts               in-process pub/sub
     db.ts                Prisma client (lazy, Neon adapter)
-tests/logic.test.ts
+    env.ts               connection-string resolution (prefixed names)
+tests/
+  logic.test.ts          vote maths, decks, slugs, wheel geometry
+  env.test.ts            env resolution priority
+scripts/smoke.ts         end-to-end check against a live server
 ```
 
 ## Design

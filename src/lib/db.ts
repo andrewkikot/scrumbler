@@ -1,6 +1,7 @@
 import { neonConfig } from '@neondatabase/serverless';
 import { PrismaNeon } from '@prisma/adapter-neon';
 import { PrismaClient } from '@prisma/client';
+import { databaseUrl } from './env';
 
 // The Neon serverless driver talks WebSocket for pooled, transactional access.
 // Node 22+ (Vercel's runtime) and Node 24 (local) both ship a global WebSocket,
@@ -11,13 +12,9 @@ if (globalWebSocket) {
 }
 
 function createClient(): PrismaClient {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error(
-      'DATABASE_URL is not set. Copy .env.example to .env and paste your Neon pooled connection string.',
-    );
-  }
-  return new PrismaClient({ adapter: new PrismaNeon({ connectionString }) });
+  // databaseUrl() throws a message naming every variable it checked, since the
+  // deployed name may be prefixed (SCRUMBLER_DATABASE_URL).
+  return new PrismaClient({ adapter: new PrismaNeon({ connectionString: databaseUrl() }) });
 }
 
 // Cached on globalThis so Next.js hot reloads (dev) and warm serverless

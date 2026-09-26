@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { defineConfig } from 'prisma/config';
+import { directDatabaseUrl } from './src/lib/env';
 
 /**
  * Prisma 7 moved the connection URL out of schema.prisma.
@@ -16,8 +17,8 @@ export default defineConfig({
     seed: 'tsx prisma/seed.ts',
   },
   datasource: {
-    // Fall back to the pooled URL so `prisma generate`/`validate` work without
-    // a direct URL configured; migrations should still use the unpooled one.
-    url: process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL ?? '',
+    // Accepts prefixed names too (SCRUMBLER_DATABASE_URL_UNPOOLED), and falls
+    // back to the pooled URL so `prisma generate` works with no database at all.
+    url: directDatabaseUrl(),
   },
 });
