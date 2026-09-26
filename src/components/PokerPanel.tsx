@@ -97,6 +97,7 @@ export function PokerPanel({ room }: { room: RoomController }) {
         revealed={state.round.revealed}
         meId={me?.id ?? null}
         canManage={isAdmin}
+        onSetSpectator={(id, isSpectator) => void room.updateParticipant(id, { isSpectator })}
         onKick={(id) => void room.removeParticipant(id)}
       />
 
