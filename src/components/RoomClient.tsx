@@ -131,14 +131,17 @@ export function RoomClient({ slug, initialState }: { slug: string; initialState:
         </div>
       )}
 
-      <main className="flex-1">
-        {!room.ready ? (
-          <div className="grid min-h-[40vh] place-items-center">
-            <p className="font-display px-blink text-[color:var(--color-ink-dim)]">Loading room…</p>
-          </div>
-        ) : !room.me ? (
-          <JoinGate roomName={room.state.name} onJoin={room.join} />
-        ) : tab === 'poker' ? (
+      <main className="flex flex-1 flex-col gap-6">
+        {/*
+          The join form sits above the room rather than replacing it, so someone
+          arriving on a shared link can see who is already at the table while
+          they type their name. `ready` only suppresses it until localStorage has
+          been read — otherwise it would flash for players who are already
+          seated.
+        */}
+        {room.ready && !room.me && <JoinGate roomName={room.state.name} onJoin={room.join} />}
+
+        {tab === 'poker' ? (
           <PokerPanel room={room} />
         ) : tab === 'wheel' ? (
           <WheelPanel room={room} />

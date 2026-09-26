@@ -39,52 +39,49 @@ export function JoinGate({ roomName, onJoin }: JoinGateProps) {
   };
 
   return (
-    <div className="grid min-h-[60vh] place-items-center px-4">
-      <form
-        className="px-panel w-full max-w-[420px] p-6"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
-        <h2 className="mb-1 text-[22px]">Take a seat</h2>
-        <p className="mb-5 text-[14px] text-[color:var(--color-ink-dim)]">
-          You are joining {roomName}. No account needed — just a name your team will recognise.
-        </p>
+    <form
+      className="px-panel w-full max-w-[460px] p-6"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
+    >
+      <h2 className="mb-1 text-[22px]">Take a seat</h2>
+      <p className="mb-5 text-[14px] text-[color:var(--color-ink-dim)]">
+        You are joining {roomName}. No account needed — just a name your team will recognise.
+      </p>
 
-        <label className="px-label" htmlFor="join-name">
-          Your name
-        </label>
+      <label className="px-label" htmlFor="join-name">
+        Your name
+      </label>
+      <input
+        id="join-name"
+        className="px-input mb-4"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Ana"
+        maxLength={32}
+        required
+      />
+
+      <label className="mb-5 flex cursor-pointer items-start gap-3">
         <input
-          id="join-name"
-          className="px-input mb-4"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Ana"
-          maxLength={32}
-          autoFocus
-          required
+          type="checkbox"
+          checked={isSpectator}
+          onChange={(e) => setIsSpectator(e.target.checked)}
+          className="mt-1 h-4 w-4 shrink-0 accent-[color:var(--color-gold)]"
         />
-
-        <label className="mb-5 flex cursor-pointer items-start gap-3">
-          <input
-            type="checkbox"
-            checked={isSpectator}
-            onChange={(e) => setIsSpectator(e.target.checked)}
-            className="mt-1 h-4 w-4 shrink-0 accent-[color:var(--color-gold)]"
-          />
-          <span className="flex flex-col">
-            <span className="font-display text-[14px]">Watch only</span>
-            <span className="text-[13px] text-[color:var(--color-ink-dim)]">
-              Sit at the table without being counted in the estimate.
-            </span>
+        <span className="flex flex-col">
+          <span className="font-display text-[14px]">Watch only</span>
+          <span className="text-[13px] text-[color:var(--color-ink-dim)]">
+            Sit at the table without being counted in the estimate.
           </span>
-        </label>
+        </span>
+      </label>
 
-        <button type="submit" className="px-btn px-btn-gold w-full" disabled={!name.trim() || busy}>
-          {busy ? 'Joining…' : 'Join room'}
-        </button>
-      </form>
-    </div>
+      <button type="submit" className="px-btn px-btn-gold w-full" disabled={!name.trim() || busy}>
+        {busy ? 'Joining…' : 'Join room'}
+      </button>
+    </form>
   );
 }
