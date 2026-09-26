@@ -1,5 +1,6 @@
 'use client';
 
+import { cardFontSize } from '@/lib/decks';
 import type { ParticipantView } from '@/lib/types';
 
 type SeatProps = {
@@ -33,8 +34,12 @@ function Seat({ participant, revealed, isMe, canManage, onKick }: SeatProps) {
         ) : revealed && value !== null ? (
           <div
             key={`${participant.id}-revealed`}
-            className="px-flip px-card font-display cursor-default"
-            style={{ background: 'var(--color-teal)', color: 'var(--color-void-deep)' }}
+            className="px-flip px-card cursor-default"
+            style={{
+              background: 'var(--color-teal)',
+              color: 'var(--color-void-deep)',
+              fontSize: cardFontSize(value),
+            }}
           >
             {value}
           </div>

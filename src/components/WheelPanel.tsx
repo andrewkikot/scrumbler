@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Wheel } from '@/components/Wheel';
+import { Wheel, type SpinResult } from '@/components/Wheel';
 import type { RoomController } from '@/hooks/useRoom';
 
 /** Reads "3 minutes ago" without pulling in a date library. */
@@ -19,6 +19,7 @@ export function WheelPanel({ room }: { room: RoomController }) {
   const { state, isAdmin } = room;
   const [newName, setNewName] = useState('');
   const [avoidRepeat, setAvoidRepeat] = useState(true);
+  const [dropWinner, setDropWinner] = useState(false);
   // Which spin the wheel has finished animating. Comparing it to the spin the
   // server reports tells us whether the wheel is still turning — no timers, and
   // nothing impure read during render.
@@ -29,9 +30,22 @@ export function WheelPanel({ room }: { room: RoomController }) {
   const spinning = state.spin !== null && settled?.id !== state.spin.id;
   const announced = state.spin && settled?.id === state.spin.id ? settled.winner : null;
 
+  /**
+   * Benching happens here rather than in the spin route: the winner has to stay
+   * on the wheel for the whole animation, and only the client knows when the
+   * show is over. Every other client then sees the same entry go inactive and
+   * drops the wedge to match.
+   */
   const handleSettled = useCallback(
-    (id: string, winner: string) => setSettled({ id, winner }),
-    [],
+    ({ spinId, winnerLabel, fresh }: SpinResult) => {
+      setSettled({ id: spinId, winner: winnerLabel });
+      // `fresh` is false for a spin restored on load — acting on that would
+      // bench somebody every time the page was refreshed.
+      if (!fresh || !isAdmin || !dropWinner) return;
+      const entry = state.wheel.find((e) => e.active && e.label === winnerLabel);
+      if (entry) void room.updateWheelEntry(entry.id, { active: false });
+    },
+    [isAdmin, dropWinner, state.wheel, room],
   );
 
   const addNames = async () => {
@@ -90,15 +104,26 @@ export function WheelPanel({ room }: { room: RoomController }) {
             >
               SPIN
             </button>
-            <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[color:var(--color-ink-dim)]">
-              <input
-                type="checkbox"
-                checked={avoidRepeat}
-                onChange={(e) => setAvoidRepeat(e.target.checked)}
-                className="h-4 w-4 accent-[color:var(--color-gold)]"
-              />
-              Skip whoever led last
-            </label>
+            <div className="flex flex-col items-start gap-2">
+              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[color:var(--color-ink-dim)]">
+                <input
+                  type="checkbox"
+                  checked={avoidRepeat}
+                  onChange={(e) => setAvoidRepeat(e.target.checked)}
+                  className="h-4 w-4 accent-[color:var(--color-gold)]"
+                />
+                Skip whoever led last
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[color:var(--color-ink-dim)]">
+                <input
+                  type="checkbox"
+                  checked={dropWinner}
+                  onChange={(e) => setDropWinner(e.target.checked)}
+                  className="h-4 w-4 accent-[color:var(--color-gold)]"
+                />
+                Drop winner off the wheel
+              </label>
+            </div>
           </div>
         )}
       </section>

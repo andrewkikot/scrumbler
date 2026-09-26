@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DECKS, numericValue, resolveDeck } from '../src/lib/decks';
+import { cardFontSize, DECKS, numericValue, resolveDeck } from '../src/lib/decks';
 import { slugifyName } from '../src/lib/ids';
 import { computeStats } from '../src/lib/stats';
-import { restAngle, segmentCenter, segmentUnderPointer, turnsFor } from '../src/lib/wheel';
+import {
+  droppedWinnerIndex,
+  restAngle,
+  segmentCenter,
+  segmentUnderPointer,
+  SPIN_WINDUP,
+  spinProgress,
+  turnsFor,
+  windupDeg,
+} from '../src/lib/wheel';
 
 const votes = (...values: string[]) => values.map((value) => ({ value }));
 
@@ -96,6 +105,47 @@ describe('round stats', () => {
   });
 });
 
+describe('card face sizing', () => {
+  it('gives the everyday one and two character faces the full size', () => {
+    for (const card of ['0', '8', '13', '89', '?', '☕', '½', 'XL']) {
+      assert.equal(cardFontSize(card), 26, `${card} was sized differently`);
+    }
+  });
+
+  it('steps down the faces that would not otherwise fit', () => {
+    assert.ok(cardFontSize('100') < cardFontSize('13'));
+    assert.ok(cardFontSize('XXL') < cardFontSize('XL'));
+    assert.ok(cardFontSize('break') < cardFontSize('100'));
+  });
+
+  /**
+   * The card is 64×88 with 3px borders and 2px of side padding, and `WIDEST` is
+   * a generous upper bound on a semibold Plex advance in ems — so if the sums
+   * here fit, the real text does.
+   */
+  it('keeps every stock face on a single line inside the card', () => {
+    const INNER = 64 - 3 * 2 - 2 * 2;
+    const WIDEST = 0.72;
+    for (const card of Object.values(DECKS).flatMap((d) => d.cards)) {
+      const width = [...card].length * WIDEST * cardFontSize(card);
+      assert.ok(width <= INNER, `${card} needs ~${Math.round(width)}px of ${INNER}px`);
+    }
+  });
+
+  it('wraps a custom deck’s long face into the card rather than over it', () => {
+    const INNER = 64 - 3 * 2 - 2 * 2;
+    const INNER_HEIGHT = 88 - 3 * 2;
+    const WIDEST = 0.72;
+    for (const card of ['break', 'no idea', 'needs a spike']) {
+      const size = cardFontSize(card);
+      const perLine = Math.floor(INNER / (WIDEST * size));
+      assert.ok(perLine >= 1, `${card} cannot fit a single character`);
+      const height = Math.ceil([...card].length / perLine) * size * 1.15;
+      assert.ok(height <= INNER_HEIGHT, `${card} needs ~${Math.round(height)}px of ${INNER_HEIGHT}px`);
+    }
+  });
+});
+
 describe('room slugs', () => {
   it('builds a readable slug from a room name', () => {
     assert.equal(slugifyName('Platform Squad #2'), 'platform-squad-2');
@@ -122,10 +172,10 @@ describe('wheel geometry', () => {
     assert.equal(turnsFor('spin-abc'), turnsFor('spin-abc'));
   });
 
-  it('always spins between 5 and 8 whole turns', () => {
+  it('always spins between 8 and 12 whole turns', () => {
     for (const id of ['a', 'bb', 'ccc', 'spin_123', 'clx9f2k4', '']) {
       const turns = turnsFor(id);
-      assert.ok(turns >= 5 && turns <= 8, `${id} gave ${turns}`);
+      assert.ok(turns >= 8 && turns <= 12, `${id} gave ${turns}`);
     }
   });
 
@@ -153,5 +203,70 @@ describe('wheel geometry', () => {
 
   it('rotates by a whole number of turns plus the segment offset', () => {
     assert.equal(restAngle(0, 4, 5), 360 * 5 - 45);
+  });
+});
+
+describe('dropping the winner off the wheel', () => {
+  const wheel = [
+    { id: 'a', label: 'Ana' },
+    { id: 'b', label: 'Bo' },
+    { id: 'c', label: 'Kim' },
+  ];
+  const without = (id: string) => wheel.filter((e) => e.id !== id);
+
+  it('finds the wedge when the winner is the one benched', () => {
+    assert.equal(droppedWinnerIndex(wheel, without('b'), 'Bo'), 1);
+    assert.equal(droppedWinnerIndex(wheel, without('a'), 'Ana'), 0);
+  });
+
+  it('ignores anybody else leaving the wheel', () => {
+    assert.equal(droppedWinnerIndex(wheel, without('c'), 'Bo'), -1);
+  });
+
+  it('ignores names arriving, and two changes at once', () => {
+    assert.equal(droppedWinnerIndex(wheel, [...wheel, { id: 'd' }], 'Bo'), -1);
+    assert.equal(droppedWinnerIndex(wheel, [{ id: 'a' }], 'Bo'), -1);
+  });
+
+  it('needs a spin to have happened at all', () => {
+    assert.equal(droppedWinnerIndex(wheel, without('b'), null), -1);
+  });
+
+  /** A rename that also benches must not be mistaken for the winner's wedge. */
+  it('matches on the label, not just the count', () => {
+    assert.equal(droppedWinnerIndex(wheel, without('b'), 'Kim'), -1);
+  });
+});
+
+describe('spin easing', () => {
+  it('starts at nothing and finishes on the target exactly', () => {
+    assert.equal(spinProgress(0), 0);
+    assert.equal(spinProgress(1), 1);
+    // Overshooting time must not overshoot the landing.
+    assert.equal(spinProgress(1.4), 1);
+    assert.equal(spinProgress(-2), 0);
+  });
+
+  it('only ever moves forwards', () => {
+    let last = -1;
+    for (let t = 0; t <= 1.0001; t += 0.01) {
+      const p = spinProgress(t);
+      assert.ok(p >= last, `progress went backwards at t=${t}`);
+      last = p;
+    }
+  });
+
+  it('spends the back half of the spin on the last of the travel', () => {
+    // The long crawl is the whole point: half the time, a sliver of the angle.
+    assert.ok(spinProgress(0.5) > 0.94, `half way through it had only ${spinProgress(0.5)}`);
+  });
+
+  it('rocks backwards only during the wind-up, and returns to zero', () => {
+    assert.equal(windupDeg(0), 0);
+    assert.ok(windupDeg(SPIN_WINDUP / 2) > 0);
+    assert.equal(windupDeg(SPIN_WINDUP), 0);
+    assert.equal(windupDeg(0.5), 0);
+    // Nothing is pulled back once the wheel is actually travelling.
+    assert.equal(spinProgress(SPIN_WINDUP), 0);
   });
 });

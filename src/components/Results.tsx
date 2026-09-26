@@ -32,21 +32,21 @@ export function Results({ stats, showAverage }: ResultsProps) {
         <dl className="mb-5 flex flex-wrap gap-3">
           <div className="px-panel-sunken min-w-[104px] flex-1 p-3">
             <dt className="font-display text-[12px] text-[color:var(--color-ink-dim)]">Average</dt>
-            <dd className="font-display text-[26px] text-[color:var(--color-gold)]">
+            <dd className="px-numeral text-[30px] text-[color:var(--color-gold)]">
               {stats.average === null ? '—' : format(stats.average)}
             </dd>
           </div>
           <div className="px-panel-sunken min-w-[104px] flex-1 p-3">
             <dt className="font-display text-[12px] text-[color:var(--color-ink-dim)]">Median</dt>
-            <dd className="font-display text-[26px] text-[color:var(--color-teal)]">
+            <dd className="px-numeral text-[30px] text-[color:var(--color-teal)]">
               {stats.median === null ? '—' : format(stats.median)}
             </dd>
           </div>
           <div className="px-panel-sunken min-w-[104px] flex-1 p-3">
             <dt className="font-display text-[12px] text-[color:var(--color-ink-dim)]">Cards in</dt>
-            <dd className="font-display text-[26px]">
+            <dd className="px-numeral text-[30px]">
               {stats.voted}
-              <span className="text-[16px] text-[color:var(--color-ink-dim)]">/{stats.eligible}</span>
+              <span className="text-[18px] text-[color:var(--color-ink-dim)]">/{stats.eligible}</span>
             </dd>
           </div>
         </dl>
@@ -55,7 +55,7 @@ export function Results({ stats, showAverage }: ResultsProps) {
       <ul className="flex flex-col gap-2">
         {stats.distribution.map((entry) => (
           <li key={entry.value} className="flex items-center gap-3">
-            <span className="font-display w-10 shrink-0 text-right text-[15px]">{entry.value}</span>
+            <span className="px-numeral w-10 shrink-0 text-right text-[17px]">{entry.value}</span>
             {/* Count bars are stepped in 4px blocks to stay on the pixel grid. */}
             <span className="px-panel-sunken h-5 flex-1 overflow-hidden">
               <span
@@ -67,7 +67,7 @@ export function Results({ stats, showAverage }: ResultsProps) {
                 }}
               />
             </span>
-            <span className="font-display w-8 shrink-0 text-[13px] text-[color:var(--color-ink-dim)]">
+            <span className="px-numeral w-8 shrink-0 text-right text-[14px] text-[color:var(--color-ink-dim)]">
               {entry.count}
             </span>
           </li>

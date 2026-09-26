@@ -1,8 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { SPIN_DURATION_MS, type SpinView, type WheelEntryView } from '@/lib/types';
-import { easeOutQuart, restAngle, segmentUnderPointer, turnsFor } from '@/lib/wheel';
+import {
+  droppedWinnerIndex,
+  restAngle,
+  segmentCenter,
+  segmentUnderPointer,
+  spinProgress,
+  turnsFor,
+  windupDeg,
+} from '@/lib/wheel';
 
 /**
  * The wheel is rasterised per-pixel into a 180×180 canvas and scaled up with
@@ -15,21 +23,58 @@ import { easeOutQuart, restAngle, segmentUnderPointer, turnsFor } from '@/lib/wh
  */
 const SIZE = 180;
 const CENTER = SIZE / 2;
-const RADIUS = 86;
+const RADIUS = 78;
 const RIM = 6;
-const HUB = 15;
+const HUB = 14;
+
+/** Clear pixels between the rim and the canvas edge: the ejection runway. */
+const RUNWAY = CENTER - RADIUS;
+
+/** How far the winning wedge stands proud of the disc once the wheel stops. */
+const POP_PX = 3;
+const POP_MS = 220;
+
+/** The drop: the wedge keeps going until it has left the disc entirely. */
+const DROP_PX = RUNWAY - 1;
+const DROP_MS = 460;
 
 /** Console-palette segment colours, cycled around the wheel. */
 const SEGMENT_COLORS = ['#ffb43c', '#4fd6c0', '#a97bff', '#ef5f6b', '#9ede4c'];
 const RIM_COLOR = '#0b0716';
 const HUB_COLOR = '#f4ead8';
 const HUB_EDGE = '#0b0716';
+/** What the winning wedge is tinted towards while it stands proud. */
+const GLOW_COLOR: [number, number, number] = [255, 244, 222];
+
+/** Ordered 4×4 dither — the wedge crumbles away in pixels, not in opacity. */
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 type Band = 0 | 1 | 2 | 3; // outside | rim | face | hub
+
+/** The winning wedge, lifted out of the disc and possibly falling away. */
+type Accent = {
+  index: number;
+  /** Canvas pixels the wedge has travelled along its own bisector. */
+  offset: number;
+  /** 0 = solid, 1 = fully dithered away. */
+  dissolve: number;
+};
 
 function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function mix(
+  a: [number, number, number],
+  b: [number, number, number],
+  amount: number,
+): [number, number, number] {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * amount),
+    Math.round(a[1] + (b[1] - a[1]) * amount),
+    Math.round(a[2] + (b[2] - a[2]) * amount),
+  ];
 }
 
 /**
@@ -64,11 +109,25 @@ function buildLookup() {
   return { angle, band };
 }
 
+/** Labels ride the face between hub and rim, in container percentages. */
+const LABEL_INSET = `${(((HUB + 3) / SIZE) * 100).toFixed(2)}%`;
+const LABEL_WIDTH = `${(((RADIUS - RIM - HUB - 5) / SIZE) * 100).toFixed(2)}%`;
+
+export type SpinResult = {
+  spinId: string;
+  winnerLabel: string;
+  /**
+   * True when the draw has only just happened. False when the wheel is showing
+   * a result it found already finished — a refresh, or someone arriving late.
+   */
+  fresh: boolean;
+};
+
 type WheelProps = {
   entries: WheelEntryView[];
   spin: SpinView | null;
   /** Fired once the wheel is at rest, with the spin it came to rest on. */
-  onSpinSettled?: (spinId: string, winnerLabel: string) => void;
+  onSpinSettled?: (result: SpinResult) => void;
 };
 
 export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
@@ -77,17 +136,66 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
   const pointerRef = useRef<HTMLDivElement>(null);
   const rotationRef = useRef(0);
   const settledRef = useRef<string | null>(null);
+  /** The spin whose winner has already been dropped — a wedge falls once. */
+  const droppedRef = useRef<string | null>(null);
+  /** Which label span carries the accent styles, so we know what to clear. */
+  const accentedLabelRef = useRef(-1);
 
-  const active = useMemo(() => entries.filter((e) => e.active), [entries]);
+  // The callback lands in a ref: a parent re-render must never restart a spin.
+  const settledCallback = useRef(onSpinSettled);
+  useEffect(() => {
+    settledCallback.current = onSpinSettled;
+  }, [onSpinSettled]);
+
+  /**
+   * The names the canvas is drawn from. It deliberately lags `entries`: when
+   * the winner is dropped off the wheel, their wedge has to fall out *before*
+   * the others close the gap.
+   */
+  const [layout, setLayout] = useState<WheelEntryView[]>(() => entries.filter((e) => e.active));
+  const [drop, setDrop] = useState<{ index: number; startedAt: number } | null>(null);
+
+  // Primitives, not objects: the stream hands us a fresh `spin` object on every
+  // frame and the animation must not read that as a new spin.
+  const spinId = spin?.id ?? null;
+  const spinStartedAt = spin?.startedAt ?? 0;
+  const winnerLabel = spin?.winnerLabel ?? null;
+
+  const layoutSignature = useMemo(
+    () => layout.map((e) => `${e.id}:${e.label}`).join(','),
+    [layout],
+  );
+
+  // ---- keep the drawn layout in step with the roster ----------------------
+  useEffect(() => {
+    const active = entries.filter((e) => e.active);
+    if (active.map((e) => `${e.id}:${e.label}`).join(',') === layoutSignature) return;
+
+    // Exactly the person who just won has left the wheel — play the drop.
+    // `droppedRef` matters: the held layout still looks droppable on the render
+    // right after the wedge lands, and without it the fall would loop.
+    const justWon = spinId !== null && settledRef.current === spinId;
+    if (!drop && justWon && droppedRef.current !== spinId) {
+      const falling = droppedWinnerIndex(layout, active, winnerLabel);
+      if (falling >= 0) {
+        droppedRef.current = spinId;
+        setDrop({ index: falling, startedAt: Date.now() });
+        return;
+      }
+    }
+
+    if (drop) return; // hold everything until the wedge has finished falling
+    setLayout(active);
+  }, [entries, layout, layoutSignature, drop, spinId, winnerLabel]);
 
   const palette = useMemo(() => {
-    const colors = active.map((_, i) => SEGMENT_COLORS[i % SEGMENT_COLORS.length]);
+    const colors = layout.map((_, i) => SEGMENT_COLORS[i % SEGMENT_COLORS.length]);
     // Stop the wheel closing on two identical neighbours.
     if (colors.length > 2 && colors[0] === colors[colors.length - 1]) {
-      colors[colors.length - 1] = SEGMENT_COLORS[(active.length + 1) % SEGMENT_COLORS.length];
+      colors[colors.length - 1] = SEGMENT_COLORS[(layout.length + 1) % SEGMENT_COLORS.length];
     }
     return colors;
-  }, [active]);
+  }, [layout]);
 
   const lookup = useMemo(() => buildLookup(), []);
 
@@ -104,13 +212,49 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
     const rim = hexToRgb(RIM_COLOR);
     const hub = hexToRgb(HUB_COLOR);
     const hubEdge = hexToRgb(HUB_EDGE);
-    const count = Math.max(active.length, 1);
+    const count = Math.max(layout.length, 1);
     const segment = 360 / count;
     const { angle, band } = lookup;
 
-    const paint = (rotation: number) => {
+    // The canvas is scaled up to fill the panel, so any nudge applied to a DOM
+    // layer has to be scaled the same way or it will not line up.
+    const displayScale = (labelsRef.current?.clientWidth || SIZE) / SIZE;
+
+    /** Which segment a lookup entry falls in, at a normalised rotation. */
+    const segmentAt = (index: number, offsetDeg: number) => {
+      let local = angle[index] - offsetDeg;
+      local -= Math.floor(local / 360) * 360;
+      return Math.min(count - 1, Math.floor(local / segment));
+    };
+
+    const paintLabels = (rotation: number, accent: Accent | null) => {
+      const labels = labelsRef.current;
+      if (!labels) return;
+      labels.style.transform = `rotate(${rotation}deg)`;
+
+      const previous = accentedLabelRef.current;
+      if (previous >= 0 && previous !== (accent?.index ?? -1)) {
+        const stale = labels.children[previous] as HTMLElement | undefined;
+        if (stale) {
+          stale.style.removeProperty('--pop');
+          stale.style.removeProperty('opacity');
+        }
+      }
+      accentedLabelRef.current = accent?.index ?? -1;
+      if (!accent) return;
+
+      const el = labels.children[accent.index] as HTMLElement | undefined;
+      if (!el) return;
+      el.style.setProperty('--pop', `${(accent.offset * displayScale).toFixed(1)}px`);
+      // Quantised, so the name blinks out in steps with the wedge under it.
+      el.style.opacity = `${1 - Math.round(accent.dissolve * 3) / 3}`;
+    };
+
+    const paint = (rotation: number, accent: Accent | null) => {
       // Normalise once; the inner loop must stay branch-light.
-      const offset = ((rotation % 360) + 360) % 360;
+      const offsetDeg = ((rotation % 360) + 360) % 360;
+      // While the wedge is out of its slot, the slot is a hole in the disc.
+      const hole = accent ? accent.index : -1;
 
       for (let i = 0; i < SIZE * SIZE; i += 1) {
         const o = i * 4;
@@ -122,12 +266,15 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
         }
 
         let color: [number, number, number];
-        if (b === 1) color = rim;
-        else if (b === 3) color = i % 2 === 0 ? hub : hubEdge;
-        else {
-          let local = angle[i] - offset;
-          local -= Math.floor(local / 360) * 360;
-          color = rgb[Math.min(count - 1, Math.floor(local / segment))] ?? rim;
+        if (b === 3) {
+          color = i % 2 === 0 ? hub : hubEdge;
+        } else {
+          const seg = segmentAt(i, offsetDeg);
+          if (seg === hole) {
+            data[o + 3] = 0;
+            continue;
+          }
+          color = b === 1 ? rim : (rgb[seg] ?? rim);
         }
 
         data[o] = color[0];
@@ -136,70 +283,138 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
         data[o + 3] = 255;
       }
 
+      // Second pass: the detached wedge, slid along its own bisector.
+      if (accent) {
+        const bisector = ((rotation + segmentCenter(accent.index, count)) * Math.PI) / 180;
+        const ox = Math.round(accent.offset * Math.sin(bisector));
+        const oy = Math.round(-accent.offset * Math.cos(bisector));
+        const face = mix(rgb[accent.index] ?? rim, GLOW_COLOR, 0.3);
+        const threshold = accent.dissolve * 16;
+
+        for (let y = 0; y < SIZE; y += 1) {
+          const sy = y - oy;
+          if (sy < 0 || sy >= SIZE) continue;
+          for (let x = 0; x < SIZE; x += 1) {
+            const sx = x - ox;
+            if (sx < 0 || sx >= SIZE) continue;
+            const j = sy * SIZE + sx;
+            const b = band[j] as Band;
+            if (b !== 1 && b !== 2) continue;
+            if (segmentAt(j, offsetDeg) !== accent.index) continue;
+            if (BAYER[(y & 3) * 4 + (x & 3)] < threshold) continue;
+
+            const color = b === 1 ? rim : face;
+            const o = (y * SIZE + x) * 4;
+            data[o] = color[0];
+            data[o + 1] = color[1];
+            data[o + 2] = color[2];
+            data[o + 3] = 255;
+          }
+        }
+      }
+
       ctx.putImageData(image, 0, 0);
-      if (labelsRef.current) labelsRef.current.style.transform = `rotate(${rotation}deg)`;
+      paintLabels(rotation, accent);
       rotationRef.current = rotation;
     };
 
-    // Where the wheel must come to rest for `spin` to be under the pointer.
-    const targetAngle = (() => {
-      if (!spin) return rotationRef.current;
-      const index = active.findIndex((e) => e.label === spin.winnerLabel);
-      if (index < 0) return rotationRef.current;
-      return restAngle(index, count, turnsFor(spin.id));
-    })();
+    /** The pointer is shoved sideways by pegs, and lifted by a rising wedge. */
+    const paintPointer = (flick: number, lift: number) => {
+      const el = pointerRef.current;
+      if (!el) return;
+      const y = (Math.min(lift, POP_PX) * displayScale).toFixed(1);
+      el.style.transform = `translateX(-50%) translateY(-${y}px) rotate(${(flick * 20).toFixed(1)}deg)`;
+    };
 
-    if (!spin) {
-      paint(rotationRef.current);
+    const reduced =
+      typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // ---- the wedge falling out of the wheel -------------------------------
+    if (drop) {
+      if (reduced) {
+        paint(rotationRef.current, { index: drop.index, offset: DROP_PX, dissolve: 1 });
+        setDrop(null);
+        return;
+      }
+      let frame = requestAnimationFrame(function fall() {
+        const p = Math.min(1, (Date.now() - drop.startedAt) / DROP_MS);
+        paint(rotationRef.current, {
+          index: drop.index,
+          offset: Math.round(POP_PX + (DROP_PX - POP_PX) * p),
+          dissolve: p,
+        });
+        paintPointer(0, POP_PX * (1 - p));
+        if (p < 1) frame = requestAnimationFrame(fall);
+        else setDrop(null);
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const winnerIndex = winnerLabel ? layout.findIndex((e) => e.label === winnerLabel) : -1;
+
+    // No spin yet, or the winner is no longer on the wheel: just sit there.
+    if (spinId === null || winnerLabel === null || winnerIndex < 0) {
+      paint(rotationRef.current, null);
+      paintPointer(0, 0);
       return;
     }
 
-    const elapsed = Date.now() - spin.startedAt;
+    const target = restAngle(winnerIndex, count, turnsFor(spinId));
+    const atRest: Accent = { index: winnerIndex, offset: POP_PX, dissolve: 0 };
+    const settle = (fresh: boolean) => {
+      if (settledRef.current === spinId) return;
+      settledRef.current = spinId;
+      settledCallback.current?.({ spinId, winnerLabel, fresh });
+    };
 
-    // A spin from an earlier session: show the result, don't replay the show.
-    if (elapsed >= SPIN_DURATION_MS || elapsed < 0) {
-      paint(targetAngle);
-      if (settledRef.current !== spin.id) {
-        settledRef.current = spin.id;
-        onSpinSettled?.(spin.id, spin.winnerLabel);
-      }
+    const elapsed = Date.now() - spinStartedAt;
+    const over = elapsed >= SPIN_DURATION_MS + POP_MS || elapsed < 0;
+
+    // A spin from an earlier session — or a viewer who asked for less motion:
+    // show the result, don't play the show. A live draw still counts as fresh
+    // for anyone downstream, whether or not this client animated it.
+    if (over || reduced) {
+      paint(target, atRest);
+      paintPointer(0, POP_PX);
+      settle(!over);
       return;
     }
 
     const from = rotationRef.current;
-    const travel = targetAngle - from;
-    let frame = 0;
-    let lastSegment = -1;
+    const travel = target - from;
+    let previous = from;
+    let lastSegment = segmentUnderPointer(from, count);
+    let flick = 0;
 
-    const step = () => {
-      const t = Math.min(1, (Date.now() - spin.startedAt) / SPIN_DURATION_MS);
-      const rotation = from + travel * easeOutQuart(t);
-      paint(rotation);
+    let frame = requestAnimationFrame(function step() {
+      const since = Date.now() - spinStartedAt;
+      const t = Math.min(1, since / SPIN_DURATION_MS);
+      const rotation = from + travel * spinProgress(t) - windupDeg(t);
 
-      // The pointer flicks as each segment clacks past it.
-      const under = segmentUnderPointer(rotation, count);
-      if (pointerRef.current) {
-        if (under !== lastSegment) {
-          lastSegment = under;
-          pointerRef.current.style.transform = 'translateX(-50%) rotate(-18deg)';
-        } else {
-          pointerRef.current.style.transform = 'translateX(-50%) rotate(0deg)';
-        }
+      // Once the wheel is still, the chosen wedge lifts out of the disc.
+      const popped = Math.min(1, Math.max(0, (since - SPIN_DURATION_MS) / POP_MS));
+      const offset = Math.round(POP_PX * popped);
+      paint(rotation, offset > 0 ? { ...atRest, offset } : null);
+
+      // The pointer clacks over every segment edge, softer as the wheel dies.
+      const segmentNow = segmentUnderPointer(rotation, count);
+      if (segmentNow !== lastSegment) {
+        lastSegment = segmentNow;
+        flick = Math.min(1, Math.abs(rotation - previous) / 6);
       }
+      flick *= 0.78;
+      previous = rotation;
+      paintPointer(flick, offset);
 
-      if (t < 1) {
-        frame = requestAnimationFrame(step);
-      } else {
-        settledRef.current = spin.id;
-        onSpinSettled?.(spin.id, spin.winnerLabel);
-      }
-    };
+      if (t >= 1) settle(true);
+      if (popped < 1) frame = requestAnimationFrame(step);
+      else paintPointer(0, POP_PX);
+    });
 
-    frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [active, palette, spin, lookup, onSpinSettled]);
+  }, [layout, palette, lookup, drop, spinId, spinStartedAt, winnerLabel]);
 
-  if (active.length === 0) {
+  if (layout.length === 0) {
     return (
       <div className="px-panel-sunken grid aspect-square w-full max-w-[420px] place-items-center p-8 text-center">
         <p className="font-display text-[color:var(--color-ink-dim)]">
@@ -211,26 +426,34 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
     );
   }
 
-  const segment = 360 / active.length;
+  const segment = 360 / layout.length;
 
   return (
     <div className="relative mx-auto w-full max-w-[420px]">
-      {/* Pointer, drawn as stacked pixel rows rather than a smooth triangle. */}
+      {/*
+        Pointer, drawn as stacked pixel rows rather than a smooth triangle. It
+        hangs from the rail above and bites *into* the rim, so the segment
+        edges have something to push against.
+      */}
       <div
         ref={pointerRef}
-        className="absolute left-1/2 top-[-10px] z-20 origin-top"
-        style={{ transform: 'translateX(-50%)', transition: 'transform 90ms steps(2)' }}
+        className="absolute left-1/2 top-[-12px] z-20 origin-top"
+        style={{ transform: 'translateX(-50%)' }}
         aria-hidden
       >
-        <svg width="28" height="34" viewBox="0 0 14 17" className="pixel-art">
+        <svg width="28" height="30" viewBox="0 0 14 15" className="pixel-art">
+          {/* the shaft, then the arrowhead's black silhouette */}
+          <rect x="4" y="0" width="6" height="8" fill="#0b0716" />
           <path
-            d="M6 0h2v1h1v1h1v1h1v1h1v1h1v1h1v2H0V6h1V5h1V4h1V3h1V2h1V1h1z"
+            d="M0 8h14v1h-1v1h-1v1h-1v1h-1v1h-1v1h-1v1h-2v-1h-1v-1h-1v-1h-1v-1h-1v-1h-1v-1h-1v-1z"
             fill="#0b0716"
           />
-          <path d="M6 1h2v1h1v1h1v1h1v1h1v1h1v1H1V6h1V5h1V4h1V3h1V2h1z" fill="#ef5f6b" />
-          <path d="M6 2h2v1h1v1h1v1h1v1H2V5h1V4h1V3h1z" fill="#ff9aa2" />
-          <rect x="4" y="8" width="6" height="9" fill="#0b0716" />
-          <rect x="5" y="8" width="4" height="8" fill="#ef5f6b" />
+          {/* rose fill, inset by one pixel all the way round */}
+          <rect x="5" y="1" width="4" height="7" fill="#ef5f6b" />
+          <path d="M2 9h10v1h-1v1h-1v1h-1v1h-1v1h-2v-1h-1v-1h-1v-1h-1v-1h-1v-1z" fill="#ef5f6b" />
+          {/* top-lit highlight: the shaft and the shoulder of the head */}
+          <rect x="5" y="1" width="4" height="3" fill="#ff9aa2" />
+          <rect x="2" y="9" width="10" height="1" fill="#ff9aa2" />
         </svg>
       </div>
 
@@ -242,12 +465,12 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
             height={SIZE}
             className="pixel-art h-full w-full"
             role="img"
-            aria-label={`Wheel with ${active.length} ${active.length === 1 ? 'name' : 'names'}`}
+            aria-label={`Wheel with ${layout.length} ${layout.length === 1 ? 'name' : 'names'}`}
           />
 
           {/* Labels ride on top of the canvas and rotate with it. */}
           <div ref={labelsRef} className="pointer-events-none absolute inset-0" aria-hidden>
-            {active.map((entry, index) => {
+            {layout.map((entry, index) => {
               const center = index * segment + segment / 2;
               const flip = center > 180;
               return (
@@ -255,11 +478,13 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
                   key={entry.id}
                   className="font-display absolute left-1/2 top-1/2 flex items-center text-[11px] font-semibold text-[#120c22]"
                   style={{
-                    width: '38%',
+                    width: LABEL_WIDTH,
                     height: 14,
                     marginTop: -7,
                     transformOrigin: '0 50%',
-                    transform: `rotate(${center - 90}deg) translateX(9%)${flip ? ' rotate(180deg)' : ''}`,
+                    // `--pop` is driven by the animation loop: a winning name
+                    // slides outward with the wedge it is printed on.
+                    transform: `rotate(${center - 90}deg) translateX(calc(${LABEL_INSET} + var(--pop, 0px)))${flip ? ' rotate(180deg)' : ''}`,
                     justifyContent: flip ? 'flex-end' : 'flex-start',
                     textShadow: '0 1px 0 rgba(255,255,255,.35)',
                   }}

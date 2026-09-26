@@ -1,5 +1,7 @@
 'use client';
 
+import { cardFontSize } from '@/lib/decks';
+
 type HandProps = {
   deck: string[];
   selected: string | null;
@@ -29,6 +31,7 @@ export function Hand({ deck, selected, disabled, disabledReason, onPick }: HandP
               key={card}
               type="button"
               className="px-card"
+              style={{ fontSize: cardFontSize(card) }}
               aria-pressed={isSelected}
               aria-label={`Estimate ${card}`}
               disabled={disabled}

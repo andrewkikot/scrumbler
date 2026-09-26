@@ -45,6 +45,23 @@ export function resolveDeck(deckKey: string, customDeck: string | null): string[
     .cards;
 }
 
+/**
+ * Point size for a card face, in px.
+ *
+ * Nearly every face is one or two characters and gets the full size; `100`,
+ * `XXL` and the rest step down so they still fit on one line. Past four
+ * characters a custom deck is writing a word rather than an estimate, so it
+ * stops shrinking and wraps inside the card instead. Sized in code because CSS
+ * cannot measure its own text.
+ */
+export function cardFontSize(card: string): number {
+  const length = [...card].length;
+  if (length <= 2) return 26;
+  if (length === 3) return 21;
+  if (length === 4) return 16;
+  return 13;
+}
+
 /** `½` and friends need a parser that is not just Number(). */
 export function numericValue(card: string): number | null {
   if ((NON_NUMERIC as readonly string[]).includes(card)) return null;

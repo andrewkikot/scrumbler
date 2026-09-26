@@ -9,7 +9,7 @@
 export function turnsFor(spinId: string): number {
   let hash = 0;
   for (let i = 0; i < spinId.length; i += 1) hash = (hash * 31 + spinId.charCodeAt(i)) >>> 0;
-  return 5 + (hash % 4);
+  return 8 + (hash % 5);
 }
 
 /** The angle a segment's centre sits at when the wheel is unrotated. */
@@ -33,5 +33,50 @@ export function segmentUnderPointer(rotation: number, count: number): number {
   return Math.min(count - 1, Math.floor(normalised / segment));
 }
 
-/** Decelerating spin curve — fast out of the gate, a long slow settle. */
-export const easeOutQuart = (t: number) => 1 - (1 - t) ** 4;
+/**
+ * Which wedge of `layout` is the winner being dropped off the wheel, or -1 if
+ * this roster change is something else entirely (a name added, someone else
+ * benched, two changes at once).
+ *
+ * It is the one case where the drawn wheel has to lag behind the roster: the
+ * wedge must fall out before the remaining names close the gap.
+ */
+export function droppedWinnerIndex(
+  layout: { id: string; label: string }[],
+  active: { id: string }[],
+  winnerLabel: string | null,
+): number {
+  if (!winnerLabel || active.length !== layout.length - 1) return -1;
+  const gone = layout.filter((entry) => !active.some((a) => a.id === entry.id));
+  if (gone.length !== 1 || gone[0].label !== winnerLabel) return -1;
+  return layout.indexOf(gone[0]);
+}
+
+/** Fraction of the spin spent loading the spring before anything launches. */
+export const SPIN_WINDUP = 0.07;
+
+/** How far the wheel rocks backwards during that wind-up, in degrees. */
+export const SPIN_WINDUP_DEG = 11;
+
+/**
+ * Fraction of the total travel covered at `t` (0…1).
+ *
+ * A quintic tail: the wheel throws most of its distance away in the first
+ * second and then spends the rest of the spin crawling through single clacks —
+ * which is what makes the last two names feel like a contest.
+ */
+export function spinProgress(t: number): number {
+  const clamped = Math.min(1, Math.max(0, t));
+  if (clamped <= SPIN_WINDUP) return 0;
+  const u = (clamped - SPIN_WINDUP) / (1 - SPIN_WINDUP);
+  return 1 - (1 - u) ** 5;
+}
+
+/**
+ * Degrees to pull *back* at `t` — a short anticipation rock that returns to
+ * zero exactly as `spinProgress` starts moving, so the two never fight.
+ */
+export function windupDeg(t: number): number {
+  if (t <= 0 || t >= SPIN_WINDUP) return 0;
+  return SPIN_WINDUP_DEG * Math.sin((t / SPIN_WINDUP) * Math.PI);
+}

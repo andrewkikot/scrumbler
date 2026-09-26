@@ -12,7 +12,7 @@ import {
   setAdminToken,
   type RememberedRoom,
 } from '@/lib/client';
-import { DECK_KEYS, deckLabel, type DeckKey } from '@/lib/decks';
+import { cardFontSize, DECK_KEYS, deckLabel, type DeckKey } from '@/lib/decks';
 import { snapshot, subscribe } from '@/lib/store';
 
 /** Stable empty list for the server snapshot; a new [] each call would loop. */
@@ -50,10 +50,11 @@ function HeroFan() {
             {isUp ? (
               <div
                 key="up"
-                className="px-flip px-card font-display cursor-default"
+                className="px-flip px-card cursor-default"
                 style={{
                   background: value === '5' ? 'var(--color-gold)' : 'var(--color-panel-hi)',
                   color: value === '5' ? 'var(--color-void-deep)' : 'var(--color-ink)',
+                  fontSize: cardFontSize(value),
                 }}
               >
                 {value}

@@ -249,6 +249,24 @@
     letter-spacing: 0.04em;
   }
 
+  /*
+   * Estimates are data, not decoration.
+   *
+   * The bitmap face is the identity of this app and it stays on every label,
+   * heading and button — but a number is the one thing nobody should have to
+   * decode: at card sizes its 5/6, 8/B and 13/18 are a coin toss across a
+   * table. Every figure a round actually turns on — card faces, the average,
+   * the median, the tallies — is set in the body face instead, with lining
+   * tabular figures so columns line up and nothing shifts as counts change.
+   */
+  .px-numeral {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-variant-numeric: lining-nums tabular-nums;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+  }
+
   /* ---- the estimation card --------------------------------------------- */
   .px-card {
     position: relative;
@@ -256,12 +274,18 @@
     place-items: center;
     width: 64px;
     height: 88px;
+    padding-inline: 2px;
     border: 3px solid var(--color-outline);
     background: var(--color-panel-hi);
     color: var(--color-ink);
-    font-family: var(--font-display);
-    font-size: 22px;
-    font-weight: 700;
+    font-family: var(--font-body);
+    font-size: 26px;
+    font-weight: 600;
+    font-variant-numeric: lining-nums tabular-nums;
+    line-height: 1.15;
+    /* A custom deck may put a word on a card: wrap it rather than let it out. */
+    text-align: center;
+    overflow-wrap: anywhere;
     cursor: pointer;
     box-shadow:
       inset 0 3px 0 var(--color-edge-light),
