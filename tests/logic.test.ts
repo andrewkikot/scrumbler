@@ -173,10 +173,10 @@ describe('wheel geometry', () => {
     assert.equal(turnsFor('spin-abc'), turnsFor('spin-abc'));
   });
 
-  it('always spins between 5 and 8 whole turns', () => {
+  it('always spins between 9 and 12 whole turns', () => {
     for (const id of ['a', 'bb', 'ccc', 'spin_123', 'clx9f2k4', '']) {
       const turns = turnsFor(id);
-      assert.ok(turns >= 5 && turns <= 8, `${id} gave ${turns}`);
+      assert.ok(turns >= 9 && turns <= 12, `${id} gave ${turns}`);
     }
   });
 

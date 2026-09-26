@@ -8,13 +8,14 @@
 /**
  * How many full turns a spin takes. Derived from the id so clients agree.
  *
- * Kept modest: over a five-second spin, more turns than this means the launch
- * is a blur of colour rather than a wheel you can watch.
+ * Enough travel that the wheel is still turning a good two revolutions a
+ * second half way through the spin, which is what a flicked wheel actually
+ * does — but not so many that the launch is a blur of colour.
  */
 export function turnsFor(spinId: string): number {
   let hash = 0;
   for (let i = 0; i < spinId.length; i += 1) hash = (hash * 31 + spinId.charCodeAt(i)) >>> 0;
-  return 5 + (hash % 4);
+  return 9 + (hash % 4);
 }
 
 /** The angle a segment's centre sits at when the wheel is unrotated. */
@@ -58,7 +59,7 @@ export function droppedWinnerIndex(
 }
 
 /** Fraction of the spin spent loading the spring before anything launches. */
-export const SPIN_WINDUP = 0.06;
+export const SPIN_WINDUP = 0.04;
 
 /** How far the wheel rocks backwards during that wind-up, in degrees. */
 export const SPIN_WINDUP_DEG = 11;
@@ -71,14 +72,16 @@ export const SPIN_WINDUP_DEG = 11;
  * the first second and leaves the rest of the spin visually stopped — the wheel
  * reads as broken rather than as slowing down.
  */
-export const SPIN_DECAY = 2.4;
+export const SPIN_DECAY = 2.2;
 
 /**
  * Fraction of the total travel covered at `t` (0…1).
  *
- * Hard off the line, then a long, *visible* deceleration: there is still about
- * a segment of travel left in the final second, so the last clacks are the
- * contest rather than a wheel that has already secretly finished.
+ * Hard off the line, then a long, *visible* deceleration — near enough to the
+ * constant-friction curve of a real wheel that it reads as one. Speed bleeds
+ * away for the whole eight seconds, with a segment still passing under the
+ * pointer in the final second, so the last clacks are the contest rather than
+ * a wheel that has already secretly finished.
  */
 export function spinProgress(t: number): number {
   const clamped = Math.min(1, Math.max(0, t));
