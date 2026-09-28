@@ -18,14 +18,18 @@ function ago(iso: string): string {
 export function WheelPanel({ room }: { room: RoomController }) {
   const { state, isAdmin } = room;
   const [newName, setNewName] = useState('');
-  const [avoidRepeat, setAvoidRepeat] = useState(true);
-  const [dropWinner, setDropWinner] = useState(false);
   // Which spin the wheel has finished animating. Comparing it to the spin the
   // server reports tells us whether the wheel is still turning — no timers, and
   // nothing impure read during render.
   const [settled, setSettled] = useState<{ id: string; winner: string } | null>(null);
 
   const activeCount = state.wheel.filter((e) => e.active).length;
+
+  /**
+   * Who gets the button. The room's setting decides, and the spin route makes
+   * the same call server-side — this only keeps the UI honest about it.
+   */
+  const canSpin = isAdmin || state.settings.allowAnyoneToSpin;
 
   const spinning = state.spin !== null && settled?.id !== state.spin.id;
   const announced = state.spin && settled?.id === state.spin.id ? settled.winner : null;
@@ -53,21 +57,25 @@ export function WheelPanel({ room }: { room: RoomController }) {
     : state.history;
 
   /**
-   * Benching happens here rather than in the spin route: the winner has to stay
-   * on the wheel for the whole animation, and only the client knows when the
-   * show is over. Every other client then sees the same entry go inactive and
-   * drops the wedge to match.
+   * Benching is asked for here rather than done in the spin route: the winner
+   * has to stay on the wheel for the whole animation, and only a client knows
+   * when the show is over. Every other client then sees the same entry go
+   * inactive and drops the wedge to match.
+   *
+   * It goes through the settle route, which takes no arguments and needs no
+   * admin token — so the drop happens in a room where anyone can spin and no
+   * admin is watching, which is most rooms. Whoever gets there first does the
+   * work; the rest are no-ops.
    */
   const handleSettled = useCallback(
     ({ spinId, winnerLabel, fresh }: SpinResult) => {
       setSettled({ id: spinId, winner: winnerLabel });
       // `fresh` is false for a spin restored on load — acting on that would
       // bench somebody every time the page was refreshed.
-      if (!fresh || !isAdmin || !dropWinner) return;
-      const entry = state.wheel.find((e) => e.active && e.label === winnerLabel);
-      if (entry) void room.updateWheelEntry(entry.id, { active: false });
+      if (!fresh || !state.settings.dropWinnerAfterSpin) return;
+      void room.settleSpin();
     },
-    [isAdmin, dropWinner, state.wheel, room],
+    [state.settings.dropWinnerAfterSpin, room],
   );
 
   const addNames = async () => {
@@ -116,7 +124,10 @@ export function WheelPanel({ room }: { room: RoomController }) {
               <p className="font-display text-[30px] leading-tight text-[color:var(--color-gold)]">
                 {announced}
               </p>
-              {isAdmin && announcedEntry && (
+              {/* The same public Drop as in the roster, put where you are
+                  already looking. It only appears at all when the automatic
+                  drop is switched off and the winner is still on the wheel. */}
+              {announcedEntry && (
                 <button
                   type="button"
                   className="px-btn px-btn-sm mt-2"
@@ -136,45 +147,26 @@ export function WheelPanel({ room }: { room: RoomController }) {
             </div>
           ) : (
             <p className="text-[color:var(--color-ink-dim)]">
-              {isAdmin ? 'Spin to pick who leads.' : 'Waiting for the admin to spin.'}
+              {canSpin ? 'Spin to pick who leads.' : 'Waiting for the admin to spin.'}
             </p>
           )}
         </div>
 
-        {isAdmin && (
-          <div className="flex flex-col items-center gap-3">
-            {/* Natural case in the string, shouted by CSS: a redesign that
-                wants sentence case should not mean editing copy. */}
-            <button
-              type="button"
-              className="px-btn px-btn-gold text-[18px] uppercase"
-              style={{ padding: '14px 40px' }}
-              disabled={activeCount === 0 || spinning}
-              onClick={() => void room.spin(avoidRepeat)}
-            >
-              Spin
-            </button>
-            <div className="flex flex-col items-start gap-2">
-              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[color:var(--color-ink-dim)]">
-                <input
-                  type="checkbox"
-                  checked={avoidRepeat}
-                  onChange={(e) => setAvoidRepeat(e.target.checked)}
-                  className="h-4 w-4 accent-[color:var(--color-gold)]"
-                />
-                Skip whoever led last
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[color:var(--color-ink-dim)]">
-                <input
-                  type="checkbox"
-                  checked={dropWinner}
-                  onChange={(e) => setDropWinner(e.target.checked)}
-                  className="h-4 w-4 accent-[color:var(--color-gold)]"
-                />
-                Drop the winner automatically
-              </label>
-            </div>
-          </div>
+        {/* One control, and nothing beside it to read first. Both checkboxes
+            that used to sit here are gone: skipping the last leader for good,
+            and the automatic drop into Settings where it belongs. */}
+        {canSpin && (
+          /* Natural case in the string, shouted by CSS: a redesign that wants
+             sentence case should not mean editing copy. */
+          <button
+            type="button"
+            className="px-btn px-btn-gold text-[18px] uppercase"
+            style={{ padding: '14px 40px' }}
+            disabled={activeCount === 0 || spinning}
+            onClick={() => void room.spin()}
+          >
+            Spin
+          </button>
         )}
       </section>
 
@@ -201,9 +193,10 @@ export function WheelPanel({ room }: { room: RoomController }) {
                 /*
                   Being off the wheel used to be 45% opacity and nothing else.
                   That measured 3.68:1 against the panel, under the 4.5:1 text
-                  floor, and a player — who sees no Drop/Add back button — had
-                  no cue but the fade. Now the name takes the secondary text
-                  token at full strength and says so in words.
+                  floor, so the only cue to a state you can act on was a fade.
+                  Now the name takes the secondary text token at full strength
+                  and says so in words — which matters more, not less, now that
+                  the button beside it is everybody's.
                 */
                 <li key={entry.id} className="flex items-center justify-between gap-2 py-1">
                   <span className="flex min-w-0 items-center gap-2">
@@ -220,20 +213,23 @@ export function WheelPanel({ room }: { room: RoomController }) {
                       </span>
                     )}
                   </span>
-                  {isAdmin && (
-                    <span className="flex shrink-0 items-center gap-1">
-                      <button
-                        type="button"
-                        className="px-btn px-btn-sm"
-                        onClick={() => void room.updateWheelEntry(entry.id, { active: !entry.active })}
-                        aria-label={
-                          entry.active
-                            ? `Drop ${entry.label} off the wheel`
-                            : `Put ${entry.label} back on the wheel`
-                        }
-                      >
-                        {entry.active ? 'Drop' : 'Add back'}
-                      </button>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {/* Anyone may take a name off the rotation and put it
+                        back. Removing it outright is the admin's, because
+                        nobody else can undo that. */}
+                    <button
+                      type="button"
+                      className="px-btn px-btn-sm"
+                      onClick={() => void room.updateWheelEntry(entry.id, { active: !entry.active })}
+                      aria-label={
+                        entry.active
+                          ? `Drop ${entry.label} off the wheel`
+                          : `Put ${entry.label} back on the wheel`
+                      }
+                    >
+                      {entry.active ? 'Drop' : 'Add back'}
+                    </button>
+                    {isAdmin && (
                       <button
                         type="button"
                         className="px-btn px-btn-sm px-btn-danger"
@@ -242,8 +238,8 @@ export function WheelPanel({ room }: { room: RoomController }) {
                       >
                         Remove
                       </button>
-                    </span>
-                  )}
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>

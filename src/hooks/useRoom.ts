@@ -40,7 +40,9 @@ export type RoomController = {
   syncWheelFromRoom: () => Promise<void>;
   updateWheelEntry: (id: string, patch: Record<string, unknown>) => Promise<void>;
   removeWheelEntry: (id: string) => Promise<void>;
-  spin: (avoidRepeat: boolean) => Promise<void>;
+  spin: () => Promise<void>;
+  /** Ask the server to take the winner off the wheel, now the wheel has stopped. */
+  settleSpin: () => Promise<void>;
   deleteRoom: () => Promise<void>;
 };
 
@@ -254,14 +256,10 @@ export function useRoom(slug: string, initial: RoomState): RoomController {
       removeWheelEntry: (id: string) =>
         run(() => api<RoomState>(`/api/rooms/${slug}/wheel/${id}`, { method: 'DELETE', slug })),
 
-      spin: (avoidRepeat: boolean) =>
-        run(() =>
-          api<RoomState>(`/api/rooms/${slug}/spin`, {
-            method: 'POST',
-            body: { avoidRepeat },
-            slug,
-          }),
-        ),
+      spin: () => run(() => api<RoomState>(`/api/rooms/${slug}/spin`, { method: 'POST', slug })),
+
+      settleSpin: () =>
+        run(() => api<RoomState>(`/api/rooms/${slug}/spin/settle`, { method: 'POST', slug })),
 
       deleteRoom: () =>
         run(async () => {

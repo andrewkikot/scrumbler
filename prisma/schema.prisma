@@ -25,6 +25,18 @@ model Room {
   showAverage Boolean @default(true)
   allowSpectatorVote Boolean @default(false)
 
+  // --- wheel settings (admin tweakable) ---
+  /// Whether anyone in the room may spin, or only the admin. On by default:
+  /// the wheel is a group ritual and waiting on one person to press the button
+  /// is the thing it exists to replace. An admin can close it again from
+  /// Settings when a room gets rowdy.
+  allowAnyoneToSpin Boolean @default(true)
+  /// Whether the name the wheel lands on leaves the wheel afterwards. On by
+  /// default: a rotation that does not shrink draws the same person twice.
+  /// Applied by whichever client watched the wheel stop, never at spin time —
+  /// see the settle route for why.
+  dropWinnerAfterSpin Boolean @default(true)
+
   /// Monotonic counter bumped by every mutation. The SSE stream watches this
   /// single column so a poll costs one tiny indexed read.
   version Int @default(0)

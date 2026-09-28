@@ -25,9 +25,11 @@ const UpdateRoom = z.object({
   allowRevote: z.boolean().optional(),
   showAverage: z.boolean().optional(),
   allowSpectatorVote: z.boolean().optional(),
+  allowAnyoneToSpin: z.boolean().optional(),
+  dropWinnerAfterSpin: z.boolean().optional(),
 });
 
-/** PATCH /api/rooms/:slug — admin-only rename + poker settings. */
+/** PATCH /api/rooms/:slug — admin-only rename + poker and wheel settings. */
 export const PATCH = route(async (request: Request, { params }: Ctx) => {
   const { slug } = await params;
   const room = await findRoom(slug);

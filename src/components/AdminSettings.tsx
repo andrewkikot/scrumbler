@@ -176,6 +176,26 @@ export function AdminSettings({ room, onDeleted }: { room: RoomController; onDel
         />
       </section>
 
+      {/* The wheel keeps its own section: everything under Rules is a poker
+          rule, and the two halves of the room do not share settings. */}
+      <section className="px-panel p-5" aria-labelledby="wheel-rules-heading">
+        <h2 id="wheel-rules-heading" className="mb-2 text-[16px]">
+          Wheel
+        </h2>
+        <Toggle
+          label="Anyone can spin"
+          hint="Off means only you draw the next daily lead. Adding and dropping names stays with you either way."
+          checked={state.settings.allowAnyoneToSpin}
+          onChange={(v) => void room.updateRoom({ allowAnyoneToSpin: v })}
+        />
+        <Toggle
+          label="Drop the winner automatically"
+          hint="The name the wheel lands on leaves it once the wheel stops, so the rotation works its way round. Off means you drop people by hand."
+          checked={state.settings.dropWinnerAfterSpin}
+          onChange={(v) => void room.updateRoom({ dropWinnerAfterSpin: v })}
+        />
+      </section>
+
       <section className="px-panel p-5" aria-labelledby="danger-heading">
         <h2 id="danger-heading" className="mb-1 text-[16px] text-[color:var(--color-rose)]">
           Delete room

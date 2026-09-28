@@ -13,15 +13,27 @@ const UpdateEntry = z.object({
   active: z.boolean().optional(),
 });
 
-/** PATCH /api/rooms/:slug/wheel/:id — admin renames or benches an entry. */
+/**
+ * PATCH /api/rooms/:slug/wheel/:id — rename or bench an entry.
+ *
+ * Benching and restoring is public. Keeping the rotation honest is the room's
+ * business, not one person's, and `active` cannot destroy anything: the name
+ * stays on the list, marked off, and the very same button puts it back.
+ *
+ * Renaming still needs the admin token. A rename is not symmetrical — whoever
+ * notices it was wrong cannot undo it, because the original text is gone.
+ */
 export const PATCH = route(async (request: Request, { params }: Ctx) => {
   const { slug, id } = await params;
   const room = await findRoom(slug);
   if (!room) return notFound();
-  if (!isAdmin(request, room.adminToken)) return forbidden();
 
   const body = await readBody(request, UpdateEntry);
   if (!body.ok) return body.response;
+
+  if (body.data.label !== undefined && !isAdmin(request, room.adminToken)) {
+    return forbidden('Renaming a wheel entry needs the admin token');
+  }
 
   const entry = await prisma.wheelEntry.findFirst({ where: { id, roomId: room.id } });
   if (!entry) return fail(404, 'Wheel entry not found');

@@ -248,22 +248,54 @@ async function main() {
   });
   check('a duplicate name is not added twice', (added.body as { added?: number }).added === 1, added.body);
 
-  const spin = await call(`/api/rooms/${slug}/spin`, { method: 'POST', body: { avoidRepeat: false }, admin });
+  const spin = await call(`/api/rooms/${slug}/spin`, { method: 'POST', admin });
   const spun = spin.body as { spin?: { winnerLabel?: string }; history?: unknown[] };
   const roster = ['Ana', 'Bo', 'Kim', 'Sam'];
   check('the winner comes from the wheel', roster.includes(spun.spin?.winnerLabel ?? ''), spun.spin);
   check('the draw is recorded in history', (spun.history ?? []).length === 1);
 
-  const first = spun.spin?.winnerLabel;
-  const second = await call(`/api/rooms/${slug}/spin`, {
-    method: 'POST',
-    body: { avoidRepeat: true },
+  // Anyone may spin by default, and nobody may interrupt a wheel mid-flight.
+  const open = await call(`/api/rooms/${slug}/spin`, { method: 'POST' });
+  check('a re-spin during the animation is refused', open.status === 409, open.body);
+
+  const closed = await call(`/api/rooms/${slug}`, {
+    method: 'PATCH',
+    body: { allowAnyoneToSpin: false },
     admin,
   });
+  check('the admin can close the wheel again', closed.status === 200, closed.body);
+  const denied = await call(`/api/rooms/${slug}/spin`, { method: 'POST' });
+  check('a closed wheel refuses a spin without the token', denied.status === 403, denied.body);
+
+  // The winner leaves the wheel, but only once the wheel has actually stopped.
+  const early = await call(`/api/rooms/${slug}/spin/settle`, { method: 'POST' });
+  const stillOn = (early.body as { wheel?: { id: string; label: string; active: boolean }[] })
+    .wheel ?? [];
   check(
-    'skip-last-leader does not draw the same name again',
-    (second.body as { spin?: { winnerLabel?: string } }).spin?.winnerLabel !== first,
+    'settling mid-animation leaves the winner on the wheel',
+    stillOn.some((w) => w.label === spun.spin?.winnerLabel && w.active),
+    stillOn,
   );
+
+  // Benching is public, renaming and removing are not.
+  const entryId = stillOn.find((w) => w.active)?.id ?? '';
+  const dropped = await call(`/api/rooms/${slug}/wheel/${entryId}`, {
+    method: 'PATCH',
+    body: { active: false },
+  });
+  check('anyone can drop a name off the wheel', dropped.status === 200, dropped.body);
+  const restored = await call(`/api/rooms/${slug}/wheel/${entryId}`, {
+    method: 'PATCH',
+    body: { active: true },
+  });
+  check('anyone can put a name back on the wheel', restored.status === 200, restored.body);
+  const renamed = await call(`/api/rooms/${slug}/wheel/${entryId}`, {
+    method: 'PATCH',
+    body: { label: 'Renamed' },
+  });
+  check('renaming an entry still needs the token', renamed.status === 403, renamed.body);
+  const removed = await call(`/api/rooms/${slug}/wheel/${entryId}`, { method: 'DELETE' });
+  check('removing an entry still needs the token', removed.status === 403, removed.body);
 
   check(
     'the spin reached the stream',

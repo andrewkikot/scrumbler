@@ -95,6 +95,8 @@ export async function getRoomState(
       allowRevote: room.allowRevote,
       showAverage: room.showAverage,
       allowSpectatorVote: room.allowSpectatorVote,
+      allowAnyoneToSpin: room.allowAnyoneToSpin,
+      dropWinnerAfterSpin: room.dropWinnerAfterSpin,
     },
     round: {
       id: round?.id ?? '',

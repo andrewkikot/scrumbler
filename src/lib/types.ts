@@ -32,6 +32,10 @@ export type RoomSettings = {
   allowRevote: boolean;
   showAverage: boolean;
   allowSpectatorVote: boolean;
+  /** Whether anyone may spin the wheel, or only the admin. */
+  allowAnyoneToSpin: boolean;
+  /** Whether the name the wheel lands on leaves the wheel afterwards. */
+  dropWinnerAfterSpin: boolean;
 };
 
 export type RoundStats = {
