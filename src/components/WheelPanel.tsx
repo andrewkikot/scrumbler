@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type CSSProperties } from 'react';
 import { Wheel, type SpinResult } from '@/components/Wheel';
 import type { RoomController } from '@/hooks/useRoom';
 
@@ -40,6 +40,19 @@ export function WheelPanel({ room }: { room: RoomController }) {
     : null;
 
   /**
+   * Recent draws, minus the one the wheel is still flying towards.
+   *
+   * The server writes a spin into the history the moment it is created, so the
+   * sidebar was printing the winner's name while the wheel was still turning —
+   * eight seconds of suspense given away by a list in the corner. A draw joins
+   * the list when the wheel stops on it, which is also the first moment it is
+   * history rather than a spoiler.
+   */
+  const history = spinning
+    ? state.history.filter((entry) => entry.id !== state.spin?.id)
+    : state.history;
+
+  /**
    * Benching happens here rather than in the spin route: the winner has to stay
    * on the wheel for the whole animation, and only the client knows when the
    * show is over. Every other client then sees the same entry go inactive and
@@ -68,8 +81,24 @@ export function WheelPanel({ room }: { room: RoomController }) {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section className="flex flex-col items-center gap-6" aria-labelledby="wheel-heading">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_296px] lg:gap-8">
+      {/*
+        The wheel is the whole point of this tab, so it gets the stage: the wide
+        column, the middle of it, and as much of the viewport's height as it can
+        take while still leaving Spin and the result in view. The 52svh cap is
+        what keeps that promise on a laptop — the wheel plus the result line plus
+        the button have to fit without scrolling, or the draw happens off-screen.
+
+        The wheel, the name it lands on and the Spin button are one group at
+        16px; the roster beside them is another, 32px away. The roster is
+        reference material, so it aligns to the top of the stage rather than
+        stretching down it, and takes a width set by the longest name.
+      */}
+      <section
+        className="flex flex-col items-center justify-center gap-4 lg:min-h-[64svh]"
+        style={{ '--wheel-max': 'min(100%, 52svh, 560px)' } as CSSProperties}
+        aria-labelledby="wheel-heading"
+      >
         <h2 id="wheel-heading" className="sr-only">
           Daily lead wheel
         </h2>
@@ -114,14 +143,16 @@ export function WheelPanel({ room }: { room: RoomController }) {
 
         {isAdmin && (
           <div className="flex flex-col items-center gap-3">
+            {/* Natural case in the string, shouted by CSS: a redesign that
+                wants sentence case should not mean editing copy. */}
             <button
               type="button"
-              className="px-btn px-btn-gold text-[18px]"
+              className="px-btn px-btn-gold text-[18px] uppercase"
               style={{ padding: '14px 40px' }}
               disabled={activeCount === 0 || spinning}
               onClick={() => void room.spin(avoidRepeat)}
             >
-              SPIN
+              Spin
             </button>
             <div className="flex flex-col items-start gap-2">
               <label className="flex cursor-pointer items-center gap-2 text-[13px] text-[color:var(--color-ink-dim)]">
@@ -147,13 +178,13 @@ export function WheelPanel({ room }: { room: RoomController }) {
         )}
       </section>
 
-      <aside className="flex flex-col gap-5">
+      <aside className="flex flex-col gap-5 lg:self-start">
         <section className="px-panel p-4" aria-labelledby="roster-heading">
           <div className="mb-3 flex items-baseline justify-between gap-2">
             <h3 id="roster-heading" className="text-[16px]">
               On the wheel
             </h3>
-            <span className="text-[13px] text-[color:var(--color-ink-dim)]">
+            <span className="px-figures text-[13px] text-[color:var(--color-ink-dim)]">
               {activeCount} of {state.wheel.length}
             </span>
           </div>
@@ -167,12 +198,28 @@ export function WheelPanel({ room }: { room: RoomController }) {
           ) : (
             <ul className="flex flex-col gap-1">
               {state.wheel.map((entry) => (
-                <li
-                  key={entry.id}
-                  className="flex items-center justify-between gap-2 py-1"
-                  style={{ opacity: entry.active ? 1 : 0.45 }}
-                >
-                  <span className="truncate text-[14px]">{entry.label}</span>
+                /*
+                  Being off the wheel used to be 45% opacity and nothing else.
+                  That measured 3.68:1 against the panel, under the 4.5:1 text
+                  floor, and a player — who sees no Drop/Add back button — had
+                  no cue but the fade. Now the name takes the secondary text
+                  token at full strength and says so in words.
+                */
+                <li key={entry.id} className="flex items-center justify-between gap-2 py-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span
+                      className={`truncate text-[14px] ${
+                        entry.active ? '' : 'text-[color:var(--color-ink-dim)]'
+                      }`}
+                    >
+                      {entry.label}
+                    </span>
+                    {!entry.active && (
+                      <span className="px-chip shrink-0 text-[color:var(--color-ink-dim)]">
+                        off
+                      </span>
+                    )}
+                  </span>
                   {isAdmin && (
                     <span className="flex shrink-0 items-center gap-1">
                       <button
@@ -233,13 +280,13 @@ export function WheelPanel({ room }: { room: RoomController }) {
           )}
         </section>
 
-        {state.history.length > 0 && (
+        {history.length > 0 && (
           <section className="px-panel p-4" aria-labelledby="history-heading">
             <h3 id="history-heading" className="mb-3 text-[16px]">
               Recent draws
             </h3>
             <ol className="flex flex-col gap-1">
-              {state.history.map((entry) => (
+              {history.map((entry) => (
                 <li key={entry.id} className="flex items-baseline justify-between gap-3 text-[14px]">
                   <span className="truncate">{entry.winnerLabel}</span>
                   <span className="shrink-0 text-[12px] text-[color:var(--color-ink-dim)]">

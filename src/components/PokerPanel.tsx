@@ -34,6 +34,20 @@ export function PokerPanel({ room }: { room: RoomController }) {
 
   return (
     <div className="flex flex-col gap-6">
+      {/*
+        Revealing the cards is the loudest moment in the room and it was silent
+        to a screen reader: the table simply changed underneath you. This region
+        is rendered empty-shaped from the first paint so that later updates are
+        announced rather than treated as new content, and it deliberately tracks
+        only the round and the reveal — wiring the live vote count in here would
+        talk over every player as they pick a card.
+      */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {state.round.revealed
+          ? `Round ${state.round.number}: cards revealed.`
+          : `Round ${state.round.number}: cards face down.`}
+      </p>
+
       <section className="px-panel flex flex-wrap items-center justify-between gap-4 p-4">
         <div className="flex min-w-0 flex-col gap-1">
           <span className="text-[13px] font-medium text-[color:var(--color-ink-dim)]">

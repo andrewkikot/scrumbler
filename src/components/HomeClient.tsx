@@ -42,11 +42,9 @@ function HeroFan() {
         const lift = [10, 2, 0, 2, 10][index];
         const tilt = [-8, -4, 0, 4, 8][index];
         return (
-          <div
-            key={index}
-            style={{ transform: `translateY(${lift}px) rotate(${tilt}deg)` }}
-            className="transition-transform"
-          >
+          // The fan's lift and tilt are fixed per position and never change,
+          // so there is nothing here to transition.
+          <div key={index} style={{ transform: `translateY(${lift}px) rotate(${tilt}deg)` }}>
             {isUp ? (
               <div
                 key="up"

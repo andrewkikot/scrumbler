@@ -137,6 +137,13 @@ function labelFontPx(count: number): number {
   return Math.max(9, Math.min(13, Math.floor(chord)));
 }
 
+/**
+ * How wide the wheel is allowed to get, for the caller to set. The wheel is
+ * square and scales freely — only its surroundings know how much room there is,
+ * so the size is theirs to state and 420px is only the fallback.
+ */
+const WHEEL_MAX = 'var(--wheel-max, 420px)';
+
 export type SpinResult = {
   spinId: string;
   winnerLabel: string;
@@ -394,6 +401,18 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
       return () => cancelAnimationFrame(frame);
     }
 
+    /**
+     * Report a spin as finished. `fresh` is false whenever nobody watched this
+     * client's wheel land on it — a restored spin, or one with no wedge left to
+     * fly to. A spin is reported once, which is what `settledRef` is for.
+     */
+    const settle = (id: string, label: string, fresh: boolean) => {
+      setAnimating(null);
+      if (settledRef.current === id) return;
+      settledRef.current = id;
+      settledCallback.current?.({ spinId: id, winnerLabel: label, fresh });
+    };
+
     const winnerIndex = winnerLabel ? layout.findIndex((e) => e.label === winnerLabel) : -1;
 
     // No spin yet, or the winner is no longer on the wheel: just sit there.
@@ -402,6 +421,11 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
       paintPointer(0, 0);
       // Whatever the roster is waiting to do, it is not waiting on this.
       setAnimating(null);
+      // A draw whose winner has since left the wheel — dropped by the admin,
+      // by hand or automatically — as seen by whoever arrives next. There is no
+      // wedge to fly to, but the draw did happen, and a wheel that never
+      // settles leaves the room reading "Spinning…" for good.
+      if (spinId !== null && winnerLabel !== null) settle(spinId, winnerLabel, false);
       return;
     }
 
@@ -416,12 +440,6 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
     }
     const { from, target } = arcRef.current;
     const atRest: Accent = { index: winnerIndex, offset: POP_PX, dissolve: 0 };
-    const settle = (fresh: boolean) => {
-      setAnimating(null);
-      if (settledRef.current === spinId) return;
-      settledRef.current = spinId;
-      settledCallback.current?.({ spinId, winnerLabel, fresh });
-    };
 
     const elapsed = Date.now() - spinStartedAt;
     const over = elapsed >= SPIN_DURATION_MS + POP_MS || elapsed < 0;
@@ -432,7 +450,7 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
     if (over || reduced) {
       paint(target, atRest);
       paintPointer(0, POP_PX);
-      settle(!over);
+      settle(spinId, winnerLabel, !over);
       return;
     }
 
@@ -465,7 +483,7 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
       previous = rotation;
       paintPointer(flick, offset);
 
-      if (t >= 1) settle(true);
+      if (t >= 1) settle(spinId, winnerLabel, true);
       if (popped < 1) frame = requestAnimationFrame(step);
       else paintPointer(0, POP_PX);
     });
@@ -475,7 +493,10 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
 
   if (layout.length === 0) {
     return (
-      <div className="px-panel-sunken grid aspect-square w-full max-w-[420px] place-items-center p-8 text-center">
+      <div
+        className="px-panel-sunken grid aspect-square w-full place-items-center p-8 text-center"
+        style={{ maxWidth: WHEEL_MAX }}
+      >
         <p className="text-[color:var(--color-ink-dim)]">
           Nobody is on the wheel yet.
           <br />
@@ -489,7 +510,7 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
   const fontPx = labelFontPx(layout.length);
 
   return (
-    <div className="relative mx-auto w-full max-w-[420px]">
+    <div className="relative mx-auto w-full" style={{ maxWidth: WHEEL_MAX }}>
       {/*
         Pointer, drawn as stacked pixel rows rather than a smooth triangle. It
         hangs from the rail above and bites *into* the rim, so the segment

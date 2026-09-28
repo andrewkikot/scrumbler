@@ -1,6 +1,7 @@
 import { publish } from './bus';
 import { prisma } from './db';
 import { resolveDeck, type DeckKey } from './decks';
+import { secretEquals } from './secret';
 import { computeStats } from './stats';
 import { ONLINE_WINDOW_MS, type RoomState } from './types';
 
@@ -14,13 +15,9 @@ export async function findRoom(slug: string) {
   return prisma.room.findUnique({ where: { slug } });
 }
 
-/** Constant-time-ish comparison of the per-room admin capability token. */
+/** Does this request carry the room's admin capability token? */
 export function isAdmin(request: Request, adminToken: string): boolean {
-  const provided = request.headers.get('x-admin-token');
-  if (!provided || provided.length !== adminToken.length) return false;
-  let diff = 0;
-  for (let i = 0; i < provided.length; i += 1) diff |= provided.charCodeAt(i) ^ adminToken.charCodeAt(i);
-  return diff === 0;
+  return secretEquals(request.headers.get('x-admin-token'), adminToken);
 }
 
 /**

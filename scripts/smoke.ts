@@ -30,11 +30,18 @@ type Json = Record<string, unknown>;
 
 async function call(
   path: string,
-  options: { method?: string; body?: unknown; admin?: string; clientId?: string } = {},
+  options: {
+    method?: string;
+    body?: unknown;
+    admin?: string;
+    clientId?: string;
+    superKey?: string;
+  } = {},
 ): Promise<{ status: number; body: Json }> {
   const headers: Record<string, string> = {};
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   if (options.admin) headers['x-admin-token'] = options.admin;
+  if (options.superKey) headers['x-super-admin-key'] = options.superKey;
   if (options.clientId) headers['x-client-id'] = options.clientId;
 
   const response = await fetch(`${BASE}${path}`, {
@@ -262,6 +269,59 @@ async function main() {
     'the spin reached the stream',
     await until(stream.frames, (f) => ((f as { history?: unknown[] }).history ?? []).length >= 2),
   );
+
+  // ---- the super-admin console -------------------------------------------
+  // Skipped unless the key is in this process's environment too, since the
+  // console is an operator tool rather than part of the product surface:
+  //   SCRUMBLER_SUPER_ADMIN_KEY=... npm run smoke
+  const superKey = process.env.SCRUMBLER_SUPER_ADMIN_KEY ?? process.env.SUPER_ADMIN_KEY;
+  if (!superKey) {
+    console.log('\nSkipping the super-admin checks (no SCRUMBLER_SUPER_ADMIN_KEY in this shell)');
+  } else {
+    console.log('\nChecking the super-admin console');
+
+    const noKey = await call('/api/admin/rooms');
+    check('listing every room needs the super-admin key', noKey.status === 403, noKey.body);
+
+    const wrongKey = await call('/api/admin/rooms', { superKey: `${superKey}x` });
+    check('a near-miss key is refused', wrongKey.status === 403, wrongKey.body);
+
+    const roomAdminToken = await call('/api/admin/rooms', { admin });
+    check('a room admin token is not a master key', roomAdminToken.status === 403);
+
+    const listed = await call(`/api/admin/rooms?q=${slug}`, { superKey });
+    const page = listed.body as { rooms?: { slug: string; counts?: { participants?: number } }[] };
+    check('the list finds the room by slug', listed.status === 200, listed.body);
+    const row = (page.rooms ?? []).find((r) => r.slug === slug);
+    check('the row carries its participant count', (row?.counts?.participants ?? 0) === 2, row);
+
+    // A second throwaway room, deleted without ever holding its admin token —
+    // which is the whole point of the console.
+    const orphan = await call('/api/rooms', {
+      method: 'POST',
+      body: { name: `Smoke Orphan ${Date.now()}` },
+    });
+    const orphanSlug = orphan.body.slug as string;
+    check('a second room is created', orphan.status === 201, orphan.body);
+
+    const refused = await call(`/api/admin/rooms/${orphanSlug}`, { method: 'DELETE' });
+    check('deleting without the key is refused', refused.status === 403);
+    check('and the room survives that attempt', (await call(`/api/rooms/${orphanSlug}`)).status === 200);
+
+    const purged = await call(`/api/admin/rooms/${orphanSlug}`, { method: 'DELETE', superKey });
+    check('the super admin deletes a room it holds no token for', purged.status === 200, purged.body);
+    check('that room is gone', (await call(`/api/rooms/${orphanSlug}`)).status === 404);
+
+    const missing = await call(`/api/admin/rooms/${orphanSlug}`, { method: 'DELETE', superKey });
+    check('deleting it twice is a 404, not a crash', missing.status === 404, missing.body);
+
+    const bulk = await call('/api/admin/rooms', {
+      method: 'DELETE',
+      superKey,
+      body: { slugs: [] },
+    });
+    check('an empty bulk delete is rejected', bulk.status === 400, bulk.body);
+  }
 
   // ---- teardown ----------------------------------------------------------
   console.log('\nDeleting the room');

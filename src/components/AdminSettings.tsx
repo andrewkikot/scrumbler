@@ -66,9 +66,9 @@ export function AdminSettings({ room, onDeleted }: { room: RoomController; onDel
   return (
     <div className="flex flex-col gap-6">
       <section className="px-panel p-5" aria-labelledby="links-heading">
-        <h3 id="links-heading" className="mb-1 text-[16px]">
+        <h2 id="links-heading" className="mb-1 text-[16px]">
           Links
-        </h3>
+        </h2>
         <p className="mb-4 text-[13px] text-[color:var(--color-ink-dim)]">
           The player link is safe to paste anywhere. The admin link carries your control token —
           anyone who opens it can change this room.
@@ -88,9 +88,9 @@ export function AdminSettings({ room, onDeleted }: { room: RoomController; onDel
       </section>
 
       <section className="px-panel p-5" aria-labelledby="room-heading">
-        <h3 id="room-heading" className="mb-4 text-[16px]">
+        <h2 id="room-heading" className="mb-4 text-[16px]">
           Room
-        </h3>
+        </h2>
 
         <label className="px-label" htmlFor="room-name">
           Name
@@ -147,9 +147,9 @@ export function AdminSettings({ room, onDeleted }: { room: RoomController; onDel
       </section>
 
       <section className="px-panel p-5" aria-labelledby="rules-heading">
-        <h3 id="rules-heading" className="mb-2 text-[16px]">
+        <h2 id="rules-heading" className="mb-2 text-[16px]">
           Rules
-        </h3>
+        </h2>
         <Toggle
           label="Reveal automatically"
           hint="Flip the cards the moment everyone present has voted."
@@ -177,9 +177,9 @@ export function AdminSettings({ room, onDeleted }: { room: RoomController; onDel
       </section>
 
       <section className="px-panel p-5" aria-labelledby="danger-heading">
-        <h3 id="danger-heading" className="mb-1 text-[16px] text-[color:var(--color-rose)]">
+        <h2 id="danger-heading" className="mb-1 text-[16px] text-[color:var(--color-rose)]">
           Delete room
-        </h3>
+        </h2>
         <p className="mb-4 text-[13px] text-[color:var(--color-ink-dim)]">
           Removes the room, its history and its wheel. The URL stops working for everyone.
         </p>

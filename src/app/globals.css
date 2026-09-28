@@ -1,6 +1,16 @@
 @import "tailwindcss";
 
 /*
+ * Agent skill packs ship markdown full of Tailwind examples, and v4's source
+ * detection scans any file git is not ignoring. Left alone it compiles those
+ * examples into the bundle — zinc and blue utilities this palette does not own,
+ * for markup that does not exist. Both paths are listed because .claude/skills
+ * is a tree of symlinks into .agents/skills.
+ */
+@source not "../../.agents";
+@source not "../../.claude";
+
+/*
  * Scrumbler — a bitmap UI.
  *
  * Rules the whole visual system follows:
@@ -76,6 +86,14 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     line-height: 1.15;
+    /* These are short and wrap to two lines often: even the lines out rather
+       than leaving one word stranded on the second. */
+    text-wrap: balance;
+  }
+
+  p {
+    /* Stops a single short word landing alone on a paragraph's last line. */
+    text-wrap: pretty;
   }
 
   /* Bitmap type must never be resampled. The `font-display` utility itself is
@@ -156,8 +174,31 @@
       box-shadow 60ms steps(2);
   }
 
-  .px-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color-panel-hi) 82%, var(--color-ink));
+  /*
+   * Every hover state below is gated on a real pointer. On a touch screen a
+   * tap leaves :hover applied to whatever was last pressed, so an ungated
+   * rule reads as a control stuck mid-press until you tap somewhere else.
+   */
+  @media (hover: hover) {
+    .px-btn:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--color-panel-hi) 82%, var(--color-ink));
+    }
+
+    .px-btn-gold:hover:not(:disabled) {
+      background: #ffc65f;
+    }
+
+    .px-btn-teal:hover:not(:disabled) {
+      background: #74e2cf;
+    }
+
+    .px-btn-danger:hover:not(:disabled) {
+      background: #f4787f;
+    }
+
+    .px-card:hover:not(:disabled) {
+      translate: 0 -6px;
+    }
   }
 
   .px-btn:active:not(:disabled) {
@@ -185,10 +226,6 @@
       4px 4px 0 var(--color-void-deep);
   }
 
-  .px-btn-gold:hover:not(:disabled) {
-    background: #ffc65f;
-  }
-
   .px-btn-gold:active:not(:disabled) {
     box-shadow:
       inset 0 3px 0 var(--color-gold-deep),
@@ -208,10 +245,6 @@
       4px 4px 0 var(--color-void-deep);
   }
 
-  .px-btn-teal:hover:not(:disabled) {
-    background: #74e2cf;
-  }
-
   .px-btn-danger {
     background: var(--color-rose);
     color: var(--color-void-deep);
@@ -223,10 +256,6 @@
       4px 4px 0 var(--color-void-deep);
   }
 
-  .px-btn-danger:hover:not(:disabled) {
-    background: #f4787f;
-  }
-
   .px-btn-sm {
     padding: 6px 10px;
     font-size: 12px;
@@ -235,6 +264,12 @@
 
   /* ---- input: a sunken slot -------------------------------------------- */
   .px-input {
+    /*
+     * 16px rather than the 15px body size: iOS Safari zooms the whole page
+     * when a focused input's text is smaller than 16px, and with the keyboard
+     * open there is no comfortable way back out of that zoom.
+     */
+    font-size: 16px;
     width: 100%;
     padding: 10px 12px;
     border: 3px solid var(--color-outline);
@@ -246,7 +281,13 @@
   }
 
   .px-input::placeholder {
-    color: color-mix(in srgb, var(--color-ink-dim) 70%, transparent);
+    /*
+     * The token itself, not a 70% mix of it. Mixed towards transparent this
+     * measured 4.28:1 against --color-void-deep, under the 4.5:1 floor for
+     * text; undimmed it is 7.62:1 and still reads as a hint beside
+     * --color-ink at 15.99:1.
+     */
+    color: var(--color-ink-dim);
   }
 
   .px-label {
@@ -304,10 +345,6 @@
     transition: translate 80ms steps(3);
   }
 
-  .px-card:hover:not(:disabled) {
-    translate: 0 -6px;
-  }
-
   .px-card[aria-pressed="true"] {
     translate: 0 -10px;
     background: var(--color-gold);
@@ -335,10 +372,30 @@
     );
   }
 
+  /*
+   * The skip link: off-screen until focused, then a real button pinned to the
+   * top-left corner. Positioned rather than reflowed, so revealing it never
+   * pushes the page down under the reader.
+   */
+  .px-skip {
+    position: absolute;
+    top: -100px;
+    left: 16px;
+    z-index: 10;
+  }
+
+  .px-skip:focus-visible {
+    top: 16px;
+  }
+
   .px-chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    /* A wrapped chip reads as broken, and the counts inside one change as
+       people vote — tabular figures keep it from resizing on every update. */
+    white-space: nowrap;
+    font-variant-numeric: lining-nums tabular-nums;
     padding: 3px 8px;
     border: 2px solid var(--color-outline);
     background: var(--color-void-deep);
@@ -347,6 +404,16 @@
     font-size: 12px;
     letter-spacing: 0.01em;
   }
+}
+
+/*
+ * Tabular figures for a changing value that is not an estimate. .px-numeral
+ * owns the big figures on cards and stat tiles and carries its own weight and
+ * tracking with it; borrowing it for a 13px counter would drag that styling
+ * along, so the digit behaviour lives here on its own.
+ */
+@utility px-figures {
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 @utility pixel-art {

@@ -76,6 +76,15 @@ export function RoomClient({ slug, initialState }: { slug: string; initialState:
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[1120px] flex-col gap-6 px-4 py-6 md:px-6">
+      {/*
+        The wordmark, the room's status chips and the section switcher all come
+        before the table, and they are the same on every room. Give the keyboard
+        a way past them that only appears once it is focused.
+      */}
+      <a href="#room-main" className="px-skip px-btn px-btn-gold">
+        Skip to the room
+      </a>
+
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
           <Link href="/" aria-label="Scrumbler home" className="shrink-0">
@@ -110,7 +119,7 @@ export function RoomClient({ slug, initialState }: { slug: string; initialState:
             key={entry.id}
             type="button"
             className={`px-btn ${tab === entry.id ? 'px-btn-gold' : ''}`}
-            aria-current={tab === entry.id ? 'page' : undefined}
+            aria-pressed={tab === entry.id}
             onClick={() => setTab(entry.id)}
           >
             {entry.label}
@@ -131,18 +140,23 @@ export function RoomClient({ slug, initialState }: { slug: string; initialState:
         </div>
       )}
 
-      <main className="flex flex-1 flex-col gap-6">
-        {/*
-          The join form sits above the room rather than replacing it, so someone
-          arriving on a shared link can see who is already at the table while
-          they type their name. `ready` only suppresses it until localStorage has
-          been read — otherwise it would flash for players who are already
-          seated.
-        */}
-        {room.ready && !room.me && <JoinGate roomName={room.state.name} onJoin={room.join} />}
-
+      <main id="room-main" className="flex flex-1 flex-col gap-6">
         {tab === 'poker' ? (
-          <PokerPanel room={room} />
+          <>
+            {/*
+              A seat is a poker thing: it is what makes your card count. The
+              wheel draws from its own roster and reads the same whether or not
+              you are seated, so asking for a name there would be a toll booth
+              in front of a spectator sport.
+
+              The form sits above the table rather than replacing it, so someone
+              arriving on a shared link can see who is already there while they
+              type. `ready` only suppresses it until localStorage has been read —
+              otherwise it would flash for players who are already seated.
+            */}
+            {room.ready && !room.me && <JoinGate roomName={room.state.name} onJoin={room.join} />}
+            <PokerPanel room={room} />
+          </>
         ) : tab === 'wheel' ? (
           <WheelPanel room={room} />
         ) : (

@@ -70,3 +70,40 @@ export const ONLINE_WINDOW_MS = 45_000;
 
 /** How long the wheel animation runs, shared by server and client. */
 export const SPIN_DURATION_MS = 8000;
+
+/**
+ * One row in the super-admin room list.
+ *
+ * No `adminToken` and no `clientId`s: the console is for housekeeping — seeing
+ * what exists and how stale it is — not for taking over a room.
+ */
+export type AdminRoomRow = {
+  slug: string;
+  name: string;
+  /** Mutation counter. A room nobody ever used sits at 0. */
+  version: number;
+  createdAt: string;
+  /** Bumped by every mutation, so: when the room was last actually used. */
+  updatedAt: string;
+  /** Most recent heartbeat from anyone in the room; null if nobody ever joined. */
+  lastSeenAt: string | null;
+  counts: {
+    participants: number;
+    rounds: number;
+    wheelEntries: number;
+    spins: number;
+  };
+};
+
+export type AdminRoomList = {
+  rooms: AdminRoomRow[];
+  /** Rooms matching the filter, which may be more than this page holds. */
+  total: number;
+  limit: number;
+  offset: number;
+  /** The server's clock, so "idle for 30 days" agrees with the filter. */
+  now: string;
+};
+
+/** How many rooms one super-admin delete call may take at once. */
+export const ADMIN_DELETE_LIMIT = 100;

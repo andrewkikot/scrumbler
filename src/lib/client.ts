@@ -134,3 +134,32 @@ export async function api<T>(
 
   return response.json() as Promise<T>;
 }
+
+// ---------------------------------------------------------------------------
+// Super-admin key
+//
+// Deliberately sessionStorage, unlike everything above: this key unlocks every
+// room on the deployment, so closing the tab should be enough to put it away.
+// ---------------------------------------------------------------------------
+
+const SUPER_KEY = 'scrumbler:superKey';
+
+export function getSuperAdminKey(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(SUPER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setSuperAdminKey(key: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (key) window.sessionStorage.setItem(SUPER_KEY, key);
+    else window.sessionStorage.removeItem(SUPER_KEY);
+  } catch {
+    /* blocked storage — the console still works for this page view */
+  }
+  invalidate();
+}

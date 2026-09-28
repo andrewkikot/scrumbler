@@ -31,6 +31,33 @@ An admin shares their powers by sending the admin link
 (`/r/<slug>?admin=<token>`); the page claims the token on load and strips it
 from the address bar so the URL is not left lying around in a screenshot.
 
+### One super admin, for housekeeping
+
+Rooms are permanent and nobody signs up, so nothing ever cleans them up: last
+year's squads keep their URLs, and their admin tokens sit in `localStorage` on
+laptops that have since been reimaged. Deleting those needs a capability wider
+than one room.
+
+That capability is a single environment variable, `SCRUMBLER_SUPER_ADMIN_KEY`
+(at least 24 characters — `openssl rand -hex 16`). Set it and `/admin` lists
+every room with how long each has been idle, and deletes any of them — one at a
+time, or a whole selection:
+
+```
+GET    /api/admin/rooms?q=&idleDays=&sort=&order=&limit=&offset=
+DELETE /api/admin/rooms            { "slugs": ["a", "b"] }
+DELETE /api/admin/rooms/:slug
+```
+
+Every one of those requires the key in an `x-super-admin-key` header, which is
+also why the console asks for it and keeps it in `sessionStorage` — closing the
+tab puts the master key away. Leave the variable unset and the routes answer
+`503`: there is no super admin until you create one, and a per-room admin token
+is never accepted in its place.
+
+The key never reaches the browser bundle. `/admin` is a shell that renders
+nothing until you paste the key, so the page itself holds no secret.
+
 ### Realtime without WebSockets
 
 Vercel's serverless functions cannot hold an open WebSocket, so the push
@@ -103,6 +130,7 @@ that window gets its own identity and joins as a player.
 | `npm run build` | generate the Prisma client, then build |
 | `npm test` | unit tests (stats, decks, slugs, wheel geometry, env) |
 | `npm run smoke` | end-to-end check against a running server |
+| `SCRUMBLER_SUPER_ADMIN_KEY=… npm run smoke` | as above, plus the /admin routes |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
 | `npm run db:deploy` | apply existing migrations (use this in CI and prod) |
@@ -175,7 +203,9 @@ prisma.config.ts         Prisma 7 config (the URL no longer lives in the schema)
 src/
   app/
     api/rooms/...        REST routes + the SSE stream
+    api/admin/rooms/     list + delete any room (super-admin key)
     r/[slug]/            the room page (server-rendered first frame)
+    admin/               the super-admin console
     globals.css          the pixel design system
   components/            Wheel, Table, Hand, Results, panels
   hooks/useRoom.ts       SSE subscription + every mutation
@@ -186,9 +216,12 @@ src/
     bus.ts               in-process pub/sub
     db.ts                Prisma client (lazy, Neon adapter)
     env.ts               connection-string resolution (prefixed names)
+    superadmin.ts        the deployment-wide key and its route guard
+    secret.ts            constant-time token comparison
 tests/
   logic.test.ts          vote maths, decks, slugs, wheel geometry
   env.test.ts            env resolution priority
+  superadmin.test.ts     the super-admin key guard
 scripts/smoke.ts         end-to-end check against a live server
 ```
 

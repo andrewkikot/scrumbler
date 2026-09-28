@@ -51,11 +51,38 @@ type SeatProps = {
   onKick: (id: string) => void;
 };
 
+/**
+ * What this seat is doing, as one sentence for a screen reader.
+ *
+ * The visual seat says this with a sunken slot, a hatched card back or a
+ * turned card, and those are `<div>`s. An `aria-label` on a `<div>` with no
+ * role is not reliably exposed, so the state would simply be missing rather
+ * than merely terse. One sentence per seat also beats labelling each layer,
+ * which would read the name back three times.
+ */
+function seatStatus(participant: ParticipantView, revealed: boolean, isMe: boolean): string {
+  const { isSpectator, online, hasVoted, value } = participant;
+  // Gold text is what marks your own seat on screen, and colour alone says
+  // nothing out loud.
+  const name = isMe ? `${participant.name} (you)` : participant.name;
+  const away = online ? '' : ', away';
+  if (isSpectator) return `${name}: watching, not estimating${away}`;
+  if (revealed && value !== null) return `${name}: estimated ${value}${away}`;
+  if (hasVoted) return `${name}: card played, face down${away}`;
+  return `${name}: no card yet${away}`;
+}
+
 function Seat({ participant, revealed, isMe, canManage, onSetSpectator, onKick }: SeatProps) {
   const { name, isSpectator, online, hasVoted, value } = participant;
 
   return (
-    <li className="flex w-[88px] flex-col items-center gap-2">
+    /*
+     * 96px rather than 88px: it is the smallest 4px step that fits two 40px
+     * admin controls with an 8px gap between them, and it gives a long name
+     * another few characters before it truncates.
+     */
+    <li className="flex w-[96px] flex-col items-center gap-2">
+      <span className="sr-only">{seatStatus(participant, revealed, isMe)}</span>
       <div className="relative">
         {isSpectator ? (
           <div
@@ -84,27 +111,31 @@ function Seat({ participant, revealed, isMe, canManage, onSetSpectator, onKick }
             {value}
           </div>
         ) : hasVoted ? (
-          <div
-            className="px-card px-card-back cursor-default"
-            aria-label={`${name} has voted`}
-            title={`${name} has voted`}
-          />
+          <div className="px-card px-card-back cursor-default" title={`${name} has voted`} />
         ) : (
           <div
             className="px-panel-sunken h-[88px] w-[64px]"
-            aria-label={`${name} has not voted`}
             title={`${name} has not voted`}
           />
         )}
 
         {!online && (
-          <span className="px-chip absolute -bottom-2 left-1/2 -translate-x-1/2 text-[color:var(--color-ink-dim)]">
+          <span
+            aria-hidden
+            className="px-chip absolute -bottom-2 left-1/2 -translate-x-1/2 text-[color:var(--color-ink-dim)]"
+          >
             away
           </span>
         )}
       </div>
 
+      {/*
+        Decorative for assistive tech: the sentence at the top of the seat
+        already carries the name, and carries it in full where this one may be
+        truncated. Sighted readers keep the tooltip to recover a long one.
+      */}
       <span
+        aria-hidden
         className={`max-w-full truncate text-[13px] font-medium ${
           isMe ? 'text-[color:var(--color-gold)]' : 'text-[color:var(--color-ink)]'
         }`}
@@ -116,13 +147,19 @@ function Seat({ participant, revealed, isMe, canManage, onSetSpectator, onKick }
       {/*
         Admin seat controls, quiet but always drawn. They used to appear only
         on hover, which on a touch screen means never.
+
+        Each is a 40px box around a 12-18px glyph. The glyphs alone were the
+        whole target, well under the 24px minimum, with "remove from the room"
+        sitting one mis-tap away from "drop out of the round". The destructive
+        one also carries its colour at rest rather than only on hover, so it
+        reads as the dangerous one on a touch screen too.
       */}
       {canManage && !isMe && (
-        <div className="flex items-center gap-3 text-[color:var(--color-ink-dim)]">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => onSetSpectator(participant.id, !isSpectator)}
-            className="opacity-60 transition hover:text-[color:var(--color-gold)] hover:opacity-100 focus-visible:opacity-100"
+            className="grid h-10 w-10 place-items-center text-[color:var(--color-ink-dim)] transition-colors hover:text-[color:var(--color-gold)]"
             aria-label={
               isSpectator ? `Deal ${name} back into the round` : `Drop ${name} out of the round`
             }
@@ -133,7 +170,7 @@ function Seat({ participant, revealed, isMe, canManage, onSetSpectator, onKick }
           <button
             type="button"
             onClick={() => onKick(participant.id)}
-            className="opacity-60 transition hover:text-[color:var(--color-rose)] hover:opacity-100 focus-visible:opacity-100"
+            className="grid h-10 w-10 place-items-center text-[color:var(--color-rose)] transition-colors hover:text-[color:var(--color-ink)]"
             aria-label={`Remove ${name} from the room`}
             title={`Remove ${name} from the room`}
           >

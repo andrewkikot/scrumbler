@@ -55,19 +55,25 @@ export function Results({ stats, showAverage }: ResultsProps) {
       <ul className="flex flex-col gap-2">
         {stats.distribution.map((entry) => (
           <li key={entry.value} className="flex items-center gap-3">
-            <span className="px-numeral w-10 shrink-0 text-right text-[17px]">{entry.value}</span>
-            {/* Count bars are stepped in 4px blocks to stay on the pixel grid. */}
+            <span className="px-numeral w-10 shrink-0 text-end text-[17px]">{entry.value}</span>
+            {/*
+              Count bars are stepped in 4px blocks to stay on the pixel grid.
+              The non-peak fill is --color-violet, not --color-edge-light:
+              edge-light is a bevel token and measured 2.91:1 against the
+              sunken --color-void behind it, under the 3:1 floor a bar that
+              carries data has to clear. Violet is 5.86:1 on the same ground.
+            */}
             <span className="px-panel-sunken h-5 flex-1 overflow-hidden">
               <span
                 className="block h-full"
                 style={{
                   width: `${(entry.count / peak) * 100}%`,
                   background:
-                    entry.count === peak ? 'var(--color-gold)' : 'var(--color-edge-light)',
+                    entry.count === peak ? 'var(--color-gold)' : 'var(--color-violet)',
                 }}
               />
             </span>
-            <span className="px-numeral w-8 shrink-0 text-right text-[14px] text-[color:var(--color-ink-dim)]">
+            <span className="px-numeral w-8 shrink-0 text-end text-[14px] text-[color:var(--color-ink-dim)]">
               {entry.count}
             </span>
           </li>
