@@ -3,7 +3,7 @@ import { prisma } from './db';
 import { resolveDeck, type DeckKey } from './decks';
 import { secretEquals } from './secret';
 import { computeStats } from './stats';
-import { ONLINE_WINDOW_MS, type RoomState } from './types';
+import { ONLINE_WINDOW_MS, SPIN_HISTORY_LIMIT, type RoomState } from './types';
 
 /** Cheap single-column read used by the SSE loop on every poll tick. */
 export async function getRoomVersion(slug: string): Promise<number | null> {
@@ -53,7 +53,7 @@ export async function getRoomState(
       participants: { orderBy: { createdAt: 'asc' } },
       rounds: { orderBy: { number: 'desc' }, take: 1, include: { votes: true } },
       wheelEntries: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
-      spins: { orderBy: { createdAt: 'desc' }, take: 8 },
+      spins: { orderBy: { createdAt: 'desc' }, take: SPIN_HISTORY_LIMIT },
     },
   });
   if (!room) return null;

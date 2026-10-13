@@ -2,7 +2,7 @@ import { randomInt } from 'node:crypto';
 import { fail, forbidden, json, notFound, route, viewerId } from '@/lib/api';
 import { prisma } from '@/lib/db';
 import { bumpAndPublish, findRoom, getRoomState, isAdmin } from '@/lib/room';
-import { SPIN_DURATION_MS } from '@/lib/types';
+import { SPIN_DURATION_MS, SPIN_HISTORY_LIMIT } from '@/lib/types';
 
 export const runtime = 'nodejs';
 
@@ -57,6 +57,19 @@ export const POST = route(async (request: Request, { params }: Ctx) => {
   const winner = entries[randomInt(entries.length)];
 
   await prisma.spin.create({ data: { roomId: room.id, winnerLabel: winner.label } });
+
+  // Trim the history to what "Recent draws" can show. Spins are only ever
+  // added here, so pruning here keeps every room bounded — a daily wheel
+  // would otherwise grow a row a day for as long as the room lives.
+  const stale = await prisma.spin.findMany({
+    where: { roomId: room.id },
+    orderBy: { createdAt: 'desc' },
+    skip: SPIN_HISTORY_LIMIT,
+    select: { id: true },
+  });
+  if (stale.length) {
+    await prisma.spin.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } });
+  }
   await bumpAndPublish(room.id, slug);
 
   return json(await getRoomState(slug, viewerId(request)));

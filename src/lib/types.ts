@@ -76,6 +76,20 @@ export const ONLINE_WINDOW_MS = 45_000;
 export const SPIN_DURATION_MS = 8000;
 
 /**
+ * How many spins a room keeps. "Recent draws" shows exactly this many, so
+ * anything older is never read again — the spin route deletes it on write.
+ */
+export const SPIN_HISTORY_LIMIT = 8;
+
+/**
+ * How many rounds a room keeps, the current one included. Only the current
+ * round is ever read; the rest are a small buffer of finished estimates, so
+ * the round route deletes anything older (votes go with them, by cascade).
+ * Round numbers keep counting up — they come from the current round, not a count.
+ */
+export const ROUND_HISTORY_LIMIT = 10;
+
+/**
  * One row in the super-admin room list.
  *
  * No `adminToken` and no `clientId`s: the console is for housekeeping — seeing

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { forbidden, json, notFound, readBody, route, viewerId } from '@/lib/api';
 import { prisma } from '@/lib/db';
 import { bumpAndPublish, currentRound, findRoom, getRoomState, isAdmin } from '@/lib/room';
+import { ROUND_HISTORY_LIMIT } from '@/lib/types';
 
 export const runtime = 'nodejs';
 
@@ -49,12 +50,24 @@ export const POST = route(async (request: Request, { params }: Ctx) => {
       });
       break;
 
-    // Move on to the next story, keeping the finished round as history.
-    case 'next':
+    // Move on to the next story, keeping the last few finished rounds. Rounds
+    // are only ever added here (past the first), so trimming here keeps every
+    // room bounded — votes go with their round by cascade.
+    case 'next': {
       await prisma.round.create({
         data: { roomId: room.id, number: round.number + 1, topic: topic ?? null },
       });
+      const stale = await prisma.round.findMany({
+        where: { roomId: room.id },
+        orderBy: { number: 'desc' },
+        skip: ROUND_HISTORY_LIMIT,
+        select: { id: true },
+      });
+      if (stale.length) {
+        await prisma.round.deleteMany({ where: { id: { in: stale.map((r) => r.id) } } });
+      }
       break;
+    }
 
     case 'topic':
       await prisma.round.update({ where: { id: round.id }, data: { topic: topic ?? null } });
