@@ -7,9 +7,12 @@ const TOKEN_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz2345678
 
 const nanoSlug = customAlphabet(SLUG_ALPHABET, 8);
 const nanoToken = customAlphabet(TOKEN_ALPHABET, 32);
+// Shorter than the admin token — it only reads — but still far past guessing.
+const nanoWatch = customAlphabet(TOKEN_ALPHABET, 20);
 
 export const newSlug = () => nanoSlug();
 export const newAdminToken = () => nanoToken();
+export const newWatchToken = () => nanoWatch();
 
 /** Turn "Platform Squad #2" into "platform-squad-2", for a friendlier URL. */
 export function slugifyName(name: string): string {

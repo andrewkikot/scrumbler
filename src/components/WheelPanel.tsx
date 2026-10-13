@@ -16,7 +16,7 @@ function ago(iso: string): string {
 }
 
 export function WheelPanel({ room }: { room: RoomController }) {
-  const { state, isAdmin } = room;
+  const { state, isAdmin, readOnly } = room;
   const [newName, setNewName] = useState('');
   // Which spin the wheel has finished animating. Comparing it to the spin the
   // server reports tells us whether the wheel is still turning — no timers, and
@@ -29,7 +29,7 @@ export function WheelPanel({ room }: { room: RoomController }) {
    * Who gets the button. The room's setting decides, and the spin route makes
    * the same call server-side — this only keeps the UI honest about it.
    */
-  const canSpin = isAdmin || state.settings.allowAnyoneToSpin;
+  const canSpin = !readOnly && (isAdmin || state.settings.allowAnyoneToSpin);
 
   const spinning = state.spin !== null && settled?.id !== state.spin.id;
   const announced = state.spin && settled?.id === state.spin.id ? settled.winner : null;
@@ -127,7 +127,7 @@ export function WheelPanel({ room }: { room: RoomController }) {
               {/* The same public Drop as in the roster, put where you are
                   already looking. It only appears at all when the automatic
                   drop is switched off and the winner is still on the wheel. */}
-              {announcedEntry && (
+              {announcedEntry && !readOnly && (
                 <button
                   type="button"
                   className="px-btn px-btn-sm mt-2"
@@ -147,7 +147,11 @@ export function WheelPanel({ room }: { room: RoomController }) {
             </div>
           ) : (
             <p className="text-[color:var(--color-ink-dim)]">
-              {canSpin ? 'Spin to pick who leads.' : 'Waiting for the admin to spin.'}
+              {canSpin
+                ? 'Spin to pick who leads.'
+                : readOnly
+                  ? 'Nobody has spun yet.'
+                  : 'Waiting for the admin to spin.'}
             </p>
           )}
         </div>
@@ -213,33 +217,35 @@ export function WheelPanel({ room }: { room: RoomController }) {
                       </span>
                     )}
                   </span>
-                  <span className="flex shrink-0 items-center gap-1">
-                    {/* Anyone may take a name off the rotation and put it
-                        back. Removing it outright is the admin's, because
-                        nobody else can undo that. */}
-                    <button
-                      type="button"
-                      className="px-btn px-btn-sm"
-                      onClick={() => void room.updateWheelEntry(entry.id, { active: !entry.active })}
-                      aria-label={
-                        entry.active
-                          ? `Drop ${entry.label} off the wheel`
-                          : `Put ${entry.label} back on the wheel`
-                      }
-                    >
-                      {entry.active ? 'Drop' : 'Add back'}
-                    </button>
-                    {isAdmin && (
+                  {!readOnly && (
+                    <span className="flex shrink-0 items-center gap-1">
+                      {/* Anyone may take a name off the rotation and put it
+                          back. Removing it outright is the admin's, because
+                          nobody else can undo that. */}
                       <button
                         type="button"
-                        className="px-btn px-btn-sm px-btn-danger"
-                        onClick={() => void room.removeWheelEntry(entry.id)}
-                        aria-label={`Remove ${entry.label} from the wheel`}
+                        className="px-btn px-btn-sm"
+                        onClick={() => void room.updateWheelEntry(entry.id, { active: !entry.active })}
+                        aria-label={
+                          entry.active
+                            ? `Drop ${entry.label} off the wheel`
+                            : `Put ${entry.label} back on the wheel`
+                        }
                       >
-                        Remove
+                        {entry.active ? 'Drop' : 'Add back'}
                       </button>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          className="px-btn px-btn-sm px-btn-danger"
+                          onClick={() => void room.removeWheelEntry(entry.id)}
+                          aria-label={`Remove ${entry.label} from the wheel`}
+                        >
+                          Remove
+                        </button>
                     )}
                   </span>
+                  )}
                 </li>
               ))}
             </ul>

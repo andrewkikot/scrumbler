@@ -1,4 +1,5 @@
 import type { DeckKey } from './decks';
+import type { TimerView } from './timer';
 
 export type ParticipantView = {
   id: string;
@@ -36,6 +37,8 @@ export type RoomSettings = {
   allowAnyoneToSpin: boolean;
   /** Whether the name the wheel lands on leaves the wheel afterwards. */
   dropWinnerAfterSpin: boolean;
+  /** Whether anyone may run the discussion timer, or only the admin. */
+  allowAnyoneToTime: boolean;
 };
 
 export type RoundStats = {
@@ -48,7 +51,10 @@ export type RoundStats = {
 };
 
 export type RoomState = {
+  /** Empty on the watch page: a watcher must never learn the player URL. */
   slug: string;
+  /** The read-only link's token. Weaker than the slug, so anyone may see it. */
+  watchToken: string;
   name: string;
   version: number;
   createdAt: string;
@@ -67,6 +73,13 @@ export type RoomState = {
   wheel: WheelEntryView[];
   spin: SpinView | null;
   history: { id: string; winnerLabel: string; createdAt: string }[];
+  /** The shared discussion timer; null when nobody has one running. */
+  timer: TimerView | null;
+  /**
+   * The server's clock when this snapshot was built. Lets each client correct
+   * for its own clock being off, so every screen hits 0:00 together.
+   */
+  serverNow: number;
 };
 
 /** Milliseconds of silence after which a participant is shown as away. */

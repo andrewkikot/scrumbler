@@ -32,7 +32,8 @@ function Toggle({ label, hint, checked, onChange }: ToggleProps) {
 export function AdminSettings({ room, onDeleted }: { room: RoomController; onDeleted: () => void }) {
   const { state } = room;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [copied, setCopied] = useState<'link' | 'admin' | null>(null);
+  const [copied, setCopied] = useState<'link' | 'admin' | 'watch' | null>(null);
+  const [confirmingReset, setConfirmingReset] = useState(false);
 
   // A draft is null until you type in the field, so the server's value shows
   // through whenever you are not actively editing — including when another
@@ -48,13 +49,15 @@ export function AdminSettings({ room, onDeleted }: { room: RoomController; onDel
     return () => clearTimeout(timer);
   }, [copied]);
 
-  const copy = async (which: 'link' | 'admin') => {
+  const copy = async (which: 'link' | 'admin' | 'watch') => {
     const origin = window.location.origin;
     const token = getAdminToken(state.slug);
     const url =
-      which === 'admin' && token
-        ? `${origin}/r/${state.slug}?admin=${encodeURIComponent(token)}`
-        : `${origin}/r/${state.slug}`;
+      which === 'watch'
+        ? `${origin}/w/${state.watchToken}`
+        : which === 'admin' && token
+          ? `${origin}/r/${state.slug}?admin=${encodeURIComponent(token)}`
+          : `${origin}/r/${state.slug}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(which);
@@ -70,10 +73,14 @@ export function AdminSettings({ room, onDeleted }: { room: RoomController; onDel
           Links
         </h2>
         <p className="mb-4 text-[13px] text-[color:var(--color-ink-dim)]">
-          The player link is safe to paste anywhere. The admin link carries your control token —
-          anyone who opens it can change this room.
+          The watch link shows the room to stakeholders who should see it but not vote — it never
+          reveals the player link. The player link is safe to paste anywhere. The admin link
+          carries your control token: anyone who opens it can change this room.
         </p>
         <div className="flex flex-wrap gap-2">
+          <button type="button" className="px-btn px-btn-sm" onClick={() => void copy('watch')}>
+            {copied === 'watch' ? 'Copied' : 'Copy watch link'}
+          </button>
           <button type="button" className="px-btn px-btn-sm" onClick={() => void copy('link')}>
             {copied === 'link' ? 'Copied' : 'Copy player link'}
           </button>
@@ -84,6 +91,39 @@ export function AdminSettings({ room, onDeleted }: { room: RoomController; onDel
           >
             {copied === 'admin' ? 'Copied' : 'Copy admin link'}
           </button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {confirmingReset ? (
+            <>
+              <span className="text-[13px]">Everyone watching on the old link is cut off.</span>
+              <button
+                type="button"
+                className="px-btn px-btn-sm px-btn-danger"
+                onClick={() => {
+                  setConfirmingReset(false);
+                  void room.updateRoom({ rotateWatchToken: true });
+                }}
+              >
+                Reset it
+              </button>
+              <button
+                type="button"
+                className="px-btn px-btn-sm"
+                onClick={() => setConfirmingReset(false)}
+              >
+                Keep it
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="px-btn px-btn-sm"
+              onClick={() => setConfirmingReset(true)}
+            >
+              Reset watch link
+            </button>
+          )}
         </div>
       </section>
 
@@ -193,6 +233,18 @@ export function AdminSettings({ room, onDeleted }: { room: RoomController; onDel
           hint="The name the wheel lands on leaves it once the wheel stops, so the rotation works its way round. Off means you drop people by hand."
           checked={state.settings.dropWinnerAfterSpin}
           onChange={(v) => void room.updateRoom({ dropWinnerAfterSpin: v })}
+        />
+      </section>
+
+      <section className="px-panel p-5" aria-labelledby="timer-rules-heading">
+        <h2 id="timer-rules-heading" className="mb-2 text-[16px]">
+          Timer
+        </h2>
+        <Toggle
+          label="Anyone can run the timer"
+          hint="Off means only you start, pause and stop a timebox. Everyone still sees it."
+          checked={state.settings.allowAnyoneToTime}
+          onChange={(v) => void room.updateRoom({ allowAnyoneToTime: v })}
         />
       </section>
 

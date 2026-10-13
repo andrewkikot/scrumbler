@@ -3,6 +3,7 @@ import { prisma } from './db';
 import { resolveDeck, type DeckKey } from './decks';
 import { secretEquals } from './secret';
 import { computeStats } from './stats';
+import { timerView } from './timer';
 import { ONLINE_WINDOW_MS, SPIN_HISTORY_LIMIT, type RoomState } from './types';
 
 /** Cheap single-column read used by the SSE loop on every poll tick. */
@@ -13,6 +14,28 @@ export async function getRoomVersion(slug: string): Promise<number | null> {
 
 export async function findRoom(slug: string) {
   return prisma.room.findUnique({ where: { slug } });
+}
+
+/** The watch link's lookup. Returns only what a watcher's routes may use. */
+export async function findWatchedRoom(watchToken: string) {
+  return prisma.room.findUnique({ where: { watchToken }, select: { slug: true, version: true } });
+}
+
+/** Cheap poll for the watch stream; null once the room or the link is gone. */
+export async function getWatchVersion(watchToken: string): Promise<number | null> {
+  const row = await findWatchedRoom(watchToken);
+  return row?.version ?? null;
+}
+
+/**
+ * The room as a watcher sees it: no slug, so the read-only link never leads to
+ * the one that can vote, and no viewer — a watcher has no card to see early.
+ */
+export async function getWatchState(watchToken: string): Promise<RoomState | null> {
+  const room = await findWatchedRoom(watchToken);
+  if (!room) return null;
+  const state = await getRoomState(room.slug);
+  return state && { ...state, slug: '', myVote: null };
 }
 
 /** Does this request carry the room's admin capability token? */
@@ -84,6 +107,7 @@ export async function getRoomState(
 
   return {
     slug: room.slug,
+    watchToken: room.watchToken,
     name: room.name,
     version: room.version,
     createdAt: room.createdAt.toISOString(),
@@ -97,6 +121,7 @@ export async function getRoomState(
       allowSpectatorVote: room.allowSpectatorVote,
       allowAnyoneToSpin: room.allowAnyoneToSpin,
       dropWinnerAfterSpin: room.dropWinnerAfterSpin,
+      allowAnyoneToTime: room.allowAnyoneToTime,
     },
     round: {
       id: round?.id ?? '',
@@ -116,6 +141,8 @@ export async function getRoomState(
       winnerLabel: s.winnerLabel,
       createdAt: s.createdAt.toISOString(),
     })),
+    timer: timerView(room),
+    serverNow: now,
   };
 }
 

@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { forbidden, json, notFound, readBody, route, viewerId } from '@/lib/api';
+import { fail, forbidden, json, notFound, readBody, route, viewerId } from '@/lib/api';
 import { prisma } from '@/lib/db';
+import { MAX_WHEEL_ENTRIES_PER_ROOM } from '@/lib/limits';
 import { bumpAndPublish, findRoom, getRoomState, isAdmin } from '@/lib/room';
 
 export const runtime = 'nodejs';
@@ -47,6 +48,15 @@ export const POST = route(async (request: Request, { params }: Ctx) => {
   let position = existing.reduce((max, e) => Math.max(max, e.position), -1) + 1;
 
   const fresh = [...new Set(labels.map((l) => l.trim()).filter(Boolean))].filter((l) => !taken.has(l));
+
+  // Fifty names a request, but requests repeat. Past this the wedges are
+  // slivers anyway — no rotation is a hundred people long.
+  if (existing.length + fresh.length > MAX_WHEEL_ENTRIES_PER_ROOM) {
+    return fail(
+      409,
+      `The wheel holds ${MAX_WHEEL_ENTRIES_PER_ROOM} names at most — it has ${existing.length}. Remove some first.`,
+    );
+  }
 
   if (fresh.length) {
     await prisma.wheelEntry.createMany({

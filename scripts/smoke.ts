@@ -60,16 +60,20 @@ async function call(
   return { status: response.status, body };
 }
 
-/** Collects `state` frames from the SSE stream in the background. */
+/** Collects `state` frames from a room's SSE stream in the background. */
 function listen(slug: string, clientId: string) {
+  return listenAt(`/api/rooms/${slug}/stream?clientId=${encodeURIComponent(clientId)}`);
+}
+
+function listenAt(path: string) {
   const controller = new AbortController();
   const frames: Json[] = [];
 
   const done = (async () => {
-    const response = await fetch(
-      `${BASE}/api/rooms/${slug}/stream?clientId=${encodeURIComponent(clientId)}`,
-      { headers: { Accept: 'text/event-stream' }, signal: controller.signal },
-    );
+    const response = await fetch(`${BASE}${path}`, {
+      headers: { Accept: 'text/event-stream' },
+      signal: controller.signal,
+    });
     if (!response.body) return;
 
     const reader = response.body.getReader();
@@ -206,14 +210,22 @@ async function main() {
     (await call(`/api/rooms/${slug}`, { method: 'PATCH', body: { deckKey: 'tshirt' } })).status ===
       403,
   );
+  // Spinning is open to the room by default, so it is no test of the boundary
+  // here — the closed-wheel check below covers it. Adding names never opens up.
   check(
-    'a player cannot spin the wheel',
-    (await call(`/api/rooms/${slug}/spin`, { method: 'POST', body: {} })).status === 403,
+    'a player cannot add names to the wheel',
+    (await call(`/api/rooms/${slug}/wheel`, { method: 'POST', body: { labels: ['Eve'] } })).status ===
+      403,
   );
   check(
     'a wrong token is refused',
-    (await call(`/api/rooms/${slug}/spin`, { method: 'POST', body: {}, admin: 'x'.repeat(32) }))
-      .status === 403,
+    (
+      await call(`/api/rooms/${slug}/round`, {
+        method: 'POST',
+        body: { action: 'next' },
+        admin: 'x'.repeat(32),
+      })
+    ).status === 403,
   );
   check(
     'a player cannot delete the room',
@@ -299,8 +311,102 @@ async function main() {
 
   check(
     'the spin reached the stream',
-    await until(stream.frames, (f) => ((f as { history?: unknown[] }).history ?? []).length >= 2),
+    await until(stream.frames, (f) => ((f as { history?: unknown[] }).history ?? []).length >= 1),
   );
+
+  // ---- the discussion timer ---------------------------------------------
+  console.log('\nRunning the discussion timer');
+  const started = await call(`/api/rooms/${slug}/timer`, {
+    method: 'POST',
+    body: { action: 'start', durationMs: 120_000, label: 'Checkout retries' },
+  });
+  const timer = (started.body as { timer?: { endsAt: number; durationMs: number; label: string } })
+    .timer;
+  check('anyone can start a timer by default', started.status === 200, started.body);
+  check('the timer runs for what it was given', timer?.durationMs === 120_000, timer);
+  check('the timer keeps its label', timer?.label === 'Checkout retries', timer);
+  check(
+    'the timer reaches the stream',
+    await until(stream.frames, (f) => (f as { timer?: unknown }).timer != null),
+  );
+
+  const paused = await call(`/api/rooms/${slug}/timer`, { method: 'POST', body: { action: 'pause' } });
+  const pausedTimer = (paused.body as { timer?: { endsAt: number | null; pausedMs: number } }).timer;
+  check('a timer pauses', pausedTimer?.endsAt === null && (pausedTimer?.pausedMs ?? 0) > 100_000);
+  const pausedTwice = await call(`/api/rooms/${slug}/timer`, { method: 'POST', body: { action: 'pause' } });
+  check('pausing a paused timer is refused', pausedTwice.status === 409, pausedTwice.body);
+
+  const tooLong = await call(`/api/rooms/${slug}/timer`, {
+    method: 'POST',
+    body: { action: 'start', durationMs: 24 * 3_600_000 },
+  });
+  check('a day-long timer is rejected', tooLong.status === 400, tooLong.body);
+
+  await call(`/api/rooms/${slug}`, { method: 'PATCH', body: { allowAnyoneToTime: false }, admin });
+  const timerDenied = await call(`/api/rooms/${slug}/timer`, { method: 'POST', body: { action: 'stop' } });
+  check('a locked timer refuses a player', timerDenied.status === 403, timerDenied.body);
+  const stopped = await call(`/api/rooms/${slug}/timer`, {
+    method: 'POST',
+    body: { action: 'stop' },
+    admin,
+  });
+  check('the admin can still stop it', (stopped.body as { timer?: unknown }).timer === null);
+
+  // ---- the watch link ----------------------------------------------------
+  console.log('\nWatching through the read-only link');
+  const watchToken = (stopped.body as { watchToken?: string }).watchToken ?? '';
+  check('the room has a watch link', watchToken.length >= 20, watchToken);
+
+  const watched = await call(`/api/watch/${watchToken}`);
+  check('the watch link reads the room', watched.status === 200, watched.body);
+  check('the watch snapshot hides the player slug', watched.body.slug === '', watched.body.slug);
+  check('the slug appears nowhere in it', !JSON.stringify(watched.body).includes(slug));
+  check(
+    'a watcher is not counted at the table',
+    ((watched.body.participants as unknown[]) ?? []).length === 2,
+  );
+  check(
+    'the watch link has no write verb',
+    (await call(`/api/watch/${watchToken}`, { method: 'POST', body: {} })).status === 405,
+  );
+
+  const watchStream = listenAt(`/api/watch/${watchToken}/stream`);
+  check(
+    'the watch stream opens with a snapshot',
+    await until(watchStream.frames, (f) => f.event === 'state'),
+  );
+  await call(`/api/rooms/${slug}/round`, {
+    method: 'POST',
+    body: { action: 'topic', topic: 'Seen from the gallery' },
+    admin,
+  });
+  check(
+    'a change in the room reaches the watcher',
+    await until(
+      watchStream.frames,
+      (f) => (f as { round?: { topic?: string } }).round?.topic === 'Seen from the gallery',
+    ),
+  );
+
+  const rotateRefused = await call(`/api/rooms/${slug}`, {
+    method: 'PATCH',
+    body: { rotateWatchToken: true },
+  });
+  check('a player cannot reset the watch link', rotateRefused.status === 403);
+  const rotated = await call(`/api/rooms/${slug}`, {
+    method: 'PATCH',
+    body: { rotateWatchToken: true },
+    admin,
+  });
+  const newWatch = (rotated.body as { watchToken?: string }).watchToken;
+  check('the admin can reset the watch link', Boolean(newWatch) && newWatch !== watchToken);
+  check(
+    'the old link closes its stream',
+    await until(watchStream.frames, (f) => f.event === 'gone'),
+  );
+  check('the old link stops working', (await call(`/api/watch/${watchToken}`)).status === 404);
+  check('the new link works', (await call(`/api/watch/${newWatch}`)).status === 200);
+  await watchStream.stop();
 
   // ---- the super-admin console -------------------------------------------
   // Skipped unless the key is in this process's environment too, since the
@@ -353,6 +459,37 @@ async function main() {
       body: { slugs: [] },
     });
     check('an empty bulk delete is rejected', bulk.status === 400, bulk.body);
+  }
+
+  // ---- abuse limits ------------------------------------------------------
+  // The per-IP limits are not exercised here: tripping one locks this machine
+  // out for the rest of the window. The caps are cheap to hit, so they are.
+  console.log('\nChecking the abuse limits');
+  const onWheel = ((await call(`/api/rooms/${slug}`)).body.wheel as unknown[]).length;
+  const fill = (n: number, from: number) => Array.from({ length: n }, (_, i) => `Filler ${from + i}`);
+  let filled = 0;
+  while (onWheel + filled < 100) {
+    const batch = Math.min(50, 100 - onWheel - filled);
+    await call(`/api/rooms/${slug}/wheel`, { method: 'POST', body: { labels: fill(batch, filled) }, admin });
+    filled += batch;
+  }
+  const overflow = await call(`/api/rooms/${slug}/wheel`, {
+    method: 'POST',
+    body: { labels: ['One too many'] },
+    admin,
+  });
+  check('the wheel stops at 100 names', overflow.status === 409, overflow.body);
+
+  const sweepRefused = await call('/api/cron/cleanup');
+  check('the cleanup cannot be triggered anonymously', sweepRefused.status >= 400, sweepRefused.status);
+  if (superKey) {
+    const sweep = await call('/api/cron/cleanup', { superKey });
+    check('the super admin can run the cleanup', sweep.status === 200, sweep.body);
+    check(
+      'the cleanup reports what it removed',
+      typeof (sweep.body as { unusedRooms?: unknown }).unusedRooms === 'number',
+      sweep.body,
+    );
   }
 
   // ---- teardown ----------------------------------------------------------

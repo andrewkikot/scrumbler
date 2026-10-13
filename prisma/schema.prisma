@@ -16,6 +16,12 @@ model Room {
   slug       String @unique
   name       String
   adminToken String @unique
+  /// The read-only link (`/w/<watchToken>`). A capability like `adminToken`,
+  /// but a weaker one: it reads the room and nothing else, and it never leads
+  /// back to `slug` — so a stakeholder holding it can watch, never vote.
+  /// The create route mints it; the database default is a safety net, so code
+  /// deployed before this column existed can still create rooms.
+  watchToken String @unique @default(dbgenerated("replace((gen_random_uuid())::text, '-'::text, ''::text)"))
 
   // --- planning poker settings (admin tweakable) ---
   deckKey     String  @default("fibonacci")
@@ -37,6 +43,19 @@ model Room {
   /// see the settle route for why.
   dropWinnerAfterSpin Boolean @default(true)
 
+  // --- discussion timer (one per room, shared by everyone) ---
+  /// Whether anyone in the room may start, pause and stop the timer, or only
+  /// the admin. Open by default for the same reason the wheel is.
+  allowAnyoneToTime Boolean @default(true)
+  /// Running: when it hits zero. Null while paused or idle.
+  timerEndsAt DateTime?
+  /// Paused: what was left (negative once into overtime). Null otherwise.
+  timerPausedMs Int?
+  /// The full length, extensions included — what the progress bar is out of.
+  /// Null means there is no timer at all.
+  timerDurationMs Int?
+  timerLabel String?
+
   /// Monotonic counter bumped by every mutation. The SSE stream watches this
   /// single column so a poll costs one tiny indexed read.
   version Int @default(0)
@@ -50,6 +69,8 @@ model Room {
   spins        Spin[]
 
   @@index([updatedAt])
+  /// The creation brake counts the last hour of rooms; cleanup finds old ones.
+  @@index([createdAt])
 }
 
 /// Someone in the room. Identified by a browser-generated `clientId` — no auth.
@@ -127,4 +148,17 @@ model Spin {
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
 
   @@index([roomId, createdAt(sort: Desc)])
+}
+
+/// Fixed-window request counters for the public write routes that create rows
+/// (rooms, seats). Kept in Postgres rather than memory because serverless
+/// instances share nothing — and rather than Redis, because one small table is
+/// cheaper than a second service. `key` is "<bucket>:<sha256 of the IP>", so no
+/// address is ever stored. The daily cleanup drops windows that have closed.
+model RateLimit {
+  key         String   @id
+  windowStart DateTime
+  count       Int      @default(1)
+
+  @@index([windowStart])
 }

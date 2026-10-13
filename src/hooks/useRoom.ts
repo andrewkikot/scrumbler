@@ -9,6 +9,7 @@ import {
   setParticipantId as persistParticipantId,
 } from '@/lib/client';
 import { onClient, onServer, snapshot, subscribe } from '@/lib/store';
+import type { TimerAction } from '@/lib/timer';
 import type { ParticipantView, RoomState } from '@/lib/types';
 
 export type Connection = 'connecting' | 'live' | 'dropped' | 'gone';
@@ -22,6 +23,16 @@ export type RoomController = {
   /** False until localStorage has been read, so the UI never flashes a join form. */
   ready: boolean;
   isAdmin: boolean;
+  /**
+   * True on the watch page. Every action is then a no-op, and components hide
+   * the controls rather than offer buttons that do nothing.
+   */
+  readOnly: boolean;
+  /**
+   * Server clock minus this browser's, in ms. Add it to `Date.now()` to count
+   * down against the same clock as everyone else.
+   */
+  clockOffset: number;
   /** Your own row in the participant list, once you have joined. */
   me: ParticipantView | null;
   error: string | null;
@@ -43,34 +54,21 @@ export type RoomController = {
   spin: () => Promise<void>;
   /** Ask the server to take the winner off the wheel, now the wheel has stopped. */
   settleSpin: () => Promise<void>;
+  timer: (input: TimerAction) => Promise<void>;
   deleteRoom: () => Promise<void>;
 };
 
 /**
- * Subscribes to a room over Server-Sent Events and exposes every mutation as a
- * plain async function.
- *
- * The transport is sealed inside this hook on purpose: routes POST, the stream
- * pushes, and no component knows how updates arrive. Swapping SSE for real
- * WebSockets later is a change to this file alone.
+ * The push channel and the snapshot it feeds, shared by the player and the
+ * watcher. Only the URL differs between them — and whether it says who is
+ * asking, which a player does to see their own card before the reveal.
  */
-export function useRoom(slug: string, initial: RoomState): RoomController {
+function useRoomStream(initial: RoomState, path: string, identify: boolean) {
   const [state, setState] = useState<RoomState>(initial);
   const [connection, setConnection] = useState<Connection>('connecting');
-  const [error, setError] = useState<string | null>(null);
-  // Read straight from localStorage rather than copying it into state in an
-  // effect — this also keeps two tabs of the same room in step.
-  const ready = useSyncExternalStore(subscribe, onClient, onServer);
-  const adminToken = useSyncExternalStore(
-    subscribe,
-    () => snapshot(`admin:${slug}`, () => getAdminToken(slug)),
-    () => null,
-  );
-  const participantId = useSyncExternalStore(
-    subscribe,
-    () => snapshot(`pid:${slug}`, () => getParticipantId(slug)),
-    () => null,
-  );
+  // Zero until the first frame arrives from the browser's side of the wire:
+  // the server-rendered snapshot is too old by page-load time to measure with.
+  const [clockOffset, setClockOffset] = useState(0);
 
   // Guards against a slow POST response overwriting a newer SSE frame.
   const versionRef = useRef(initial.version);
@@ -79,15 +77,13 @@ export function useRoom(slug: string, initial: RoomState): RoomController {
     if (next.version < versionRef.current) return;
     versionRef.current = next.version;
     setState(next);
+    setClockOffset(next.serverNow - Date.now());
   }, []);
-
-  // Writing invalidates the store, which re-runs the snapshot above.
-  const rememberSeat = useCallback((id: string) => persistParticipantId(slug, id), [slug]);
 
   // ---- the push channel ---------------------------------------------------
   useEffect(() => {
     const source = new EventSource(
-      `/api/rooms/${slug}/stream?clientId=${encodeURIComponent(getClientId())}`,
+      identify ? `${path}?clientId=${encodeURIComponent(getClientId())}` : path,
     );
     let closedByUs = false;
 
@@ -118,7 +114,42 @@ export function useRoom(slug: string, initial: RoomState): RoomController {
       closedByUs = true;
       source.close();
     };
-  }, [slug, applyState]);
+  }, [path, identify, applyState]);
+
+  return { state, connection, clockOffset, applyState };
+}
+
+/**
+ * Subscribes to a room over Server-Sent Events and exposes every mutation as a
+ * plain async function.
+ *
+ * The transport is sealed inside this hook on purpose: routes POST, the stream
+ * pushes, and no component knows how updates arrive. Swapping SSE for real
+ * WebSockets later is a change to this file alone.
+ */
+export function useRoom(slug: string, initial: RoomState): RoomController {
+  const { state, connection, clockOffset, applyState } = useRoomStream(
+    initial,
+    `/api/rooms/${slug}/stream`,
+    true,
+  );
+  const [error, setError] = useState<string | null>(null);
+  // Read straight from localStorage rather than copying it into state in an
+  // effect — this also keeps two tabs of the same room in step.
+  const ready = useSyncExternalStore(subscribe, onClient, onServer);
+  const adminToken = useSyncExternalStore(
+    subscribe,
+    () => snapshot(`admin:${slug}`, () => getAdminToken(slug)),
+    () => null,
+  );
+  const participantId = useSyncExternalStore(
+    subscribe,
+    () => snapshot(`pid:${slug}`, () => getParticipantId(slug)),
+    () => null,
+  );
+
+  // Writing invalidates the store, which re-runs the snapshot above.
+  const rememberSeat = useCallback((id: string) => persistParticipantId(slug, id), [slug]);
 
   // ---- presence -----------------------------------------------------------
   useEffect(() => {
@@ -261,6 +292,11 @@ export function useRoom(slug: string, initial: RoomState): RoomController {
       settleSpin: () =>
         run(() => api<RoomState>(`/api/rooms/${slug}/spin/settle`, { method: 'POST', slug })),
 
+      timer: (input: TimerAction) =>
+        run(() =>
+          api<RoomState>(`/api/rooms/${slug}/timer`, { method: 'POST', body: input, slug }),
+        ),
+
       deleteRoom: () =>
         run(async () => {
           await api(`/api/rooms/${slug}`, { method: 'DELETE', slug });
@@ -275,9 +311,53 @@ export function useRoom(slug: string, initial: RoomState): RoomController {
     connection,
     ready,
     isAdmin: Boolean(adminToken),
+    readOnly: false,
+    clockOffset,
     me,
     error,
     clearError: () => setError(null),
     ...actions,
+  };
+}
+
+const nothing = async () => {};
+
+/**
+ * The room through a watch link: the same stream and snapshot, no seat, no
+ * presence ping (a watcher is not at the table), and nothing to call. The
+ * server would refuse every write anyway — a watcher never learns the slug the
+ * write routes live under — so these are no-ops rather than requests.
+ */
+export function useWatchedRoom(token: string, initial: RoomState): RoomController {
+  const { state, connection, clockOffset } = useRoomStream(
+    initial,
+    `/api/watch/${encodeURIComponent(token)}/stream`,
+    false,
+  );
+  return {
+    state,
+    connection,
+    ready: true,
+    isAdmin: false,
+    readOnly: true,
+    clockOffset,
+    me: null,
+    error: null,
+    clearError: () => {},
+    join: nothing,
+    leave: nothing,
+    vote: nothing,
+    round: nothing,
+    updateRoom: nothing,
+    updateParticipant: nothing,
+    removeParticipant: nothing,
+    addWheelNames: nothing,
+    syncWheelFromRoom: nothing,
+    updateWheelEntry: nothing,
+    removeWheelEntry: nothing,
+    spin: nothing,
+    settleSpin: nothing,
+    timer: nothing,
+    deleteRoom: nothing,
   };
 }

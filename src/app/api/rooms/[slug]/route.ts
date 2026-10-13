@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { forbidden, json, notFound, readBody, route, viewerId } from '@/lib/api';
 import { prisma } from '@/lib/db';
 import { DECK_KEYS } from '@/lib/decks';
+import { newWatchToken } from '@/lib/ids';
 import { bumpAndPublish, findRoom, getRoomState, isAdmin } from '@/lib/room';
 
 export const runtime = 'nodejs';
@@ -27,9 +28,12 @@ const UpdateRoom = z.object({
   allowSpectatorVote: z.boolean().optional(),
   allowAnyoneToSpin: z.boolean().optional(),
   dropWinnerAfterSpin: z.boolean().optional(),
+  allowAnyoneToTime: z.boolean().optional(),
+  /** Mint a new watch link; the old one stops working on its next poll. */
+  rotateWatchToken: z.literal(true).optional(),
 });
 
-/** PATCH /api/rooms/:slug — admin-only rename + poker and wheel settings. */
+/** PATCH /api/rooms/:slug — admin-only rename, settings, and watch-link reset. */
 export const PATCH = route(async (request: Request, { params }: Ctx) => {
   const { slug } = await params;
   const room = await findRoom(slug);
@@ -39,7 +43,11 @@ export const PATCH = route(async (request: Request, { params }: Ctx) => {
   const body = await readBody(request, UpdateRoom);
   if (!body.ok) return body.response;
 
-  await prisma.room.update({ where: { id: room.id }, data: body.data });
+  const { rotateWatchToken, ...settings } = body.data;
+  await prisma.room.update({
+    where: { id: room.id },
+    data: { ...settings, ...(rotateWatchToken ? { watchToken: newWatchToken() } : {}) },
+  });
   await bumpAndPublish(room.id, slug);
 
   return json(await getRoomState(slug, viewerId(request)));

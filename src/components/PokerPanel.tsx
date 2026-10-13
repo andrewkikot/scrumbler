@@ -119,13 +119,17 @@ export function PokerPanel({ room }: { room: RoomController }) {
         <Results stats={state.stats} showAverage={state.settings.showAverage} />
       )}
 
-      <Hand
-        deck={state.settings.deck}
-        selected={state.myVote}
-        disabled={!canVote || (!state.settings.allowRevote && Boolean(me?.hasVoted))}
-        disabledReason={voteBlockedReason}
-        onPick={(value) => void room.vote(value)}
-      />
+      {/* A watcher has no seat, so a hand of greyed-out cards would only be
+          something to read past. */}
+      {!room.readOnly && (
+        <Hand
+          deck={state.settings.deck}
+          selected={state.myVote}
+          disabled={!canVote || (!state.settings.allowRevote && Boolean(me?.hasVoted))}
+          disabledReason={voteBlockedReason}
+          onPick={(value) => void room.vote(value)}
+        />
+      )}
     </div>
   );
 }

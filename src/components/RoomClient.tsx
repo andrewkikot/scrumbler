@@ -7,6 +7,7 @@ import { AdminSettings } from '@/components/AdminSettings';
 import { JoinGate } from '@/components/JoinGate';
 import { Mark } from '@/components/Mark';
 import { PokerPanel } from '@/components/PokerPanel';
+import { canRunTimer, TimerBar } from '@/components/TimerBar';
 import { WheelPanel } from '@/components/WheelPanel';
 import { useRoom, type Connection } from '@/hooks/useRoom';
 import { rememberRoom, setAdminToken } from '@/lib/client';
@@ -36,6 +37,7 @@ export function RoomClient({ slug, initialState }: { slug: string; initialState:
 
   const room = useRoom(slug, initialState);
   const [tab, setTab] = useState<Tab>('poker');
+  const [timerSetup, setTimerSetup] = useState(false);
 
   // Having claimed it, drop the token from the address bar so a shared
   // screenshot or a copied URL does not hand out admin rights.
@@ -113,19 +115,34 @@ export function RoomClient({ slug, initialState }: { slug: string; initialState:
         </div>
       </header>
 
-      <nav className="flex gap-2" aria-label="Room sections">
-        {tabs.map((entry) => (
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <nav className="flex gap-2" aria-label="Room sections">
+          {tabs.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              className={`px-btn ${tab === entry.id ? 'px-btn-gold' : ''}`}
+              aria-pressed={tab === entry.id}
+              onClick={() => setTab(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </nav>
+        {/* Outside the nav: it is not a section, and it works from any of them. */}
+        {!room.state.timer && canRunTimer(room) && (
           <button
-            key={entry.id}
             type="button"
-            className={`px-btn ${tab === entry.id ? 'px-btn-gold' : ''}`}
-            aria-pressed={tab === entry.id}
-            onClick={() => setTab(entry.id)}
+            className="px-btn"
+            aria-expanded={timerSetup}
+            onClick={() => setTimerSetup((open) => !open)}
           >
-            {entry.label}
+            Timebox
           </button>
-        ))}
-      </nav>
+        )}
+      </div>
+
+      <TimerBar room={room} setupOpen={timerSetup} onCloseSetup={() => setTimerSetup(false)} />
 
       {room.error && (
         <div

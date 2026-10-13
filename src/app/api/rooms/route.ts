@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { badRequest, json, route } from '@/lib/api';
 import { prisma } from '@/lib/db';
 import { DECK_KEYS } from '@/lib/decks';
-import { newAdminToken, newSlug, slugifyName } from '@/lib/ids';
+import { newAdminToken, newSlug, newWatchToken, slugifyName } from '@/lib/ids';
+import { rateLimit, roomCreationBrake } from '@/lib/limits';
 
 export const runtime = 'nodejs';
 
@@ -14,6 +15,10 @@ const CreateRoom = z.object({
 
 /** POST /api/rooms — create a permanent room and mint its admin token. */
 export const POST = route(async (request: Request) => {
+  // Per address first, so one script cannot spend the global allowance alone.
+  const limited = (await rateLimit(request, 'createRoom')) ?? (await roomCreationBrake());
+  if (limited) return limited;
+
   const body = await request.json().catch(() => null);
   const parsed = CreateRoom.safeParse(body);
   if (!parsed.success) return badRequest(parsed.error.issues[0]?.message ?? 'Invalid body');
@@ -35,6 +40,7 @@ export const POST = route(async (request: Request) => {
       slug,
       name,
       adminToken,
+      watchToken: newWatchToken(),
       deckKey: deckKey ?? 'fibonacci',
       rounds: { create: { number: 1 } },
       wheelEntries: {

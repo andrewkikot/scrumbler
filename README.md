@@ -1,7 +1,8 @@
 # Scrumbler
 
-Planning poker in a permanent room, plus a wheel that picks who runs tomorrow's
-daily. Players open a link and pick a card — there are no accounts.
+Planning poker in a permanent room, a wheel that picks who runs tomorrow's
+daily, and a shared timer to timebox the discussion. Players open a link and
+pick a card — there are no accounts.
 
 Next.js 16 (App Router) · Prisma 7 · Neon Postgres · Server-Sent Events · Tailwind 4
 
@@ -24,12 +25,37 @@ That is the entire auth model, and it is why there is no sign-up:
 | Reveal / clear / start a round | no | yes |
 | Change the deck and rules | no | yes |
 | Add, bench or remove wheel names | no | yes |
-| Spin the wheel | no | yes |
+| Spin the wheel | yes, unless the admin closes it | yes |
+| Start, pause, stop the timer | yes, unless the admin locks it | yes |
+| Reset the watch link | no | yes |
 | Delete the room | no | yes |
 
 An admin shares their powers by sending the admin link
 (`/r/<slug>?admin=<token>`); the page claims the token on load and strips it
 from the address bar so the URL is not left lying around in a screenshot.
+
+### A watch link for people who should not vote
+
+Stakeholders who want to follow along get `/w/<watchToken>` (Settings → Copy
+watch link). It is a separate capability, not a mode of the player page: the
+watch routes (`GET /api/watch/<token>` and its `/stream`) are read-only, and
+the snapshot they serve has the slug blanked out — so a watcher never learns
+the URL that can vote, and no edit to the address bar gets them a seat. They do
+not appear at the table or count towards "who is in".
+
+The admin can reset the link; every stream on the old one closes within a
+second. A player can see the watch token, which is fine — it is strictly less
+than what they already hold.
+
+### A shared timer
+
+`POST /api/rooms/<slug>/timer` starts, pauses, resumes, extends (+1 min) or
+stops the room's single timebox. The server stores only when it ends (or what
+was left when paused); every client counts down locally against the server's
+clock — each snapshot carries `serverNow`, so a laptop whose clock is off still
+hits 0:00 with everyone else — and a running timer costs no writes at all. At
+zero each browser plays a short chime (mutable per device) and the clock turns
+red and counts the overtime.
 
 ### One super admin, for housekeeping
 
@@ -57,6 +83,39 @@ is never accepted in its place.
 
 The key never reaches the browser bundle. `/admin` is a shell that renders
 nothing until you paste the key, so the page itself holds no secret.
+
+### Limits, so nobody can fill the database
+
+With no sign-up, the routes that create rows are open to anyone with curl. Each
+limit sits far above real use and far below what a loop can do
+(`src/lib/limits.ts`):
+
+| | Limit |
+|---|---|
+| New rooms, whole deployment | 200 per hour — stops a script on many addresses |
+| New rooms, per IP | 20 per hour |
+| Joins, per IP | 120 per 10 minutes (an office shares one address) |
+| Seats per room | 50 — a full room first clears seats unseen for 30 days |
+| Wheel names per room | 100 |
+
+Per-IP counters live in a small `RateLimit` table rather than in memory
+(serverless instances share nothing) or Redis (a second service). Only a hash of
+the address is stored. Over a limit, the route answers `429` with `Retry-After`.
+
+**Daily cleanup.** Vercel Cron calls `GET /api/cron/cleanup` at 04:00 UTC
+(`vercel.json`), authenticated with `CRON_SECRET`. It deletes:
+
+- rooms never used (no mutation at all) a week after they were made;
+- seats nobody has heartbeated from in 30 days (their votes go with them);
+- rate-limit windows older than a day;
+- rooms idle longer than `SCRUMBLER_ROOM_IDLE_DAYS` — **only if you set it**
+  (minimum 30). Unset, rooms are permanent, as promised above.
+
+Run it by hand with the super-admin key:
+
+```bash
+curl -H "x-super-admin-key: $SCRUMBLER_SUPER_ADMIN_KEY" https://<host>/api/cron/cleanup
+```
 
 ### Realtime without WebSockets
 
@@ -128,7 +187,7 @@ that window gets its own identity and joins as a player.
 |---|---|
 | `npm run dev` | development server |
 | `npm run build` | generate the Prisma client, then build |
-| `npm test` | unit tests (stats, decks, slugs, wheel geometry, env) |
+| `npm test` | unit tests (stats, decks, slugs, wheel, timer, limits, env) |
 | `npm run smoke` | end-to-end check against a running server |
 | `SCRUMBLER_SUPER_ADMIN_KEY=… npm run smoke` | as above, plus the /admin routes |
 | `npm run typecheck` | `tsc --noEmit` |
@@ -159,6 +218,8 @@ that window gets its own identity and joins as a player.
 
    - `DATABASE_URL` — the **pooled** string
    - `DATABASE_URL_UNPOOLED` — the **direct** string
+   - `CRON_SECRET` — any long random string (`openssl rand -hex 16`); Vercel
+     signs the daily cleanup with it. Without it the cron call is refused.
 
    **Prefixed names work too.** If those names are already claimed — by another
    project, or by a team-wide shared variable — Vercel prefixes them, and this
@@ -203,14 +264,21 @@ prisma.config.ts         Prisma 7 config (the URL no longer lives in the schema)
 src/
   app/
     api/rooms/...        REST routes + the SSE stream
+    api/watch/[token]/   read-only snapshot + stream for the watch link
     api/admin/rooms/     list + delete any room (super-admin key)
+    api/cron/cleanup/    the daily sweep (CRON_SECRET or super-admin key)
     r/[slug]/            the room page (server-rendered first frame)
+    w/[token]/           the watch page
     admin/               the super-admin console
     globals.css          the pixel design system
   components/            Wheel, Table, Hand, Results, panels
   hooks/useRoom.ts       SSE subscription + every mutation
   lib/
     room.ts              snapshot building, admin checks, auto-reveal
+    sse.ts               the SSE loop both streams share
+    timer.ts             timer arithmetic (shared by route and countdown)
+    limits.ts            rate limits, creation brake, per-room caps
+    cleanup.ts           what the daily sweep deletes
     stats.ts             vote maths
     wheel.ts             wheel geometry
     bus.ts               in-process pub/sub
@@ -222,6 +290,8 @@ tests/
   logic.test.ts          vote maths, decks, slugs, wheel geometry
   env.test.ts            env resolution priority
   superadmin.test.ts     the super-admin key guard
+  timer.test.ts          start, pause, extend, overtime, clock face
+  limits.test.ts         rate-limit windows, client address, idle sweep
 scripts/smoke.ts         end-to-end check against a live server
 ```
 

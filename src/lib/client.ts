@@ -16,6 +16,7 @@ const NAME_KEY = 'scrumbler:name';
 const ADMIN_PREFIX = 'scrumbler:admin:';
 const PARTICIPANT_PREFIX = 'scrumbler:pid:';
 const ROOMS_KEY = 'scrumbler:rooms';
+const TIMER_MUTED_KEY = 'scrumbler:timerMuted';
 
 export type RememberedRoom = {
   slug: string;
@@ -68,6 +69,10 @@ export function getClientId(): string {
 
 export const getDisplayName = () => read(NAME_KEY) ?? '';
 export const setDisplayName = (name: string) => write(NAME_KEY, name);
+
+/** Whether this browser stays quiet when a timer runs out. Every room, one switch. */
+export const getTimerMuted = () => read(TIMER_MUTED_KEY) === '1';
+export const setTimerMuted = (muted: boolean) => (muted ? write(TIMER_MUTED_KEY, '1') : remove(TIMER_MUTED_KEY));
 
 export const getAdminToken = (slug: string) => read(`${ADMIN_PREFIX}${slug}`);
 export const setAdminToken = (slug: string, token: string) => write(`${ADMIN_PREFIX}${slug}`, token);
