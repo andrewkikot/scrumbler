@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { cardFontSize, DECKS, numericValue, resolveDeck } from '../src/lib/decks';
+import {
+  burstAt,
+  createShow,
+  RING_MS,
+  ringAt,
+  shellAt,
+  SHOW_MS,
+  sparksAt,
+} from '../src/lib/fireworks';
 import { slugifyName } from '../src/lib/ids';
 import { computeStats } from '../src/lib/stats';
 import {
   droppedIndex,
+  edgeGuard,
+  landingOffset,
   restAngle,
   segmentCenter,
   segmentUnderPointer,
@@ -311,5 +322,181 @@ describe('spin easing', () => {
     assert.equal(windupDeg(0.5), 0);
     // Nothing is pulled back once the wheel is actually travelling.
     assert.equal(spinProgress(SPIN_WINDUP), 0);
+  });
+});
+
+describe('winner fireworks', () => {
+  const aspect = 1.4;
+
+  /** The result is shared, so the celebration of it should be shared too. */
+  it('lets off the same show for the same spin, and a different one for another', () => {
+    assert.deepEqual(createShow('spin-abc'), createShow('spin-abc'));
+    assert.notDeepEqual(createShow('spin-abc'), createShow('spin-xyz'));
+  });
+
+  it('keeps every shell inside the box it is drawn in', () => {
+    for (const burst of createShow('spin-abc')) {
+      assert.ok(burst.burstX > 0 && burst.burstX < 1, `burst at ${burst.burstX}`);
+      assert.ok(burst.fromX > 0 && burst.fromX < 1, `fired from ${burst.fromX}`);
+      assert.ok(burst.burstY > 0 && burst.burstY < 1, `burst ${burst.burstY} high`);
+    }
+  });
+
+  /**
+   * The overlay is torn down at SHOW_MS, so anything still burning then would
+   * be cut off mid-flight — which reads as a dropped frame, not an ending.
+   */
+  it('has every ember out before the show ends', () => {
+    for (const seed of ['a', 'spin-abc', 'clx9f2k4', '']) {
+      for (const burst of createShow(seed)) {
+        assert.ok(burst.life > 0, `${seed} gave a burst with no life`);
+        assert.ok(burstAt(burst) + burst.life <= SHOW_MS, `${seed} burns past the show`);
+        assert.equal(sparksAt(burst, SHOW_MS, aspect).length, 0);
+      }
+    }
+  });
+
+  it('climbs from the floor to the point it goes off at', () => {
+    const [burst] = createShow('spin-abc');
+    assert.equal(shellAt(burst, burst.launchAt - 1, aspect), null);
+    assert.equal(shellAt(burst, burstAt(burst), aspect), null);
+
+    const launch = shellAt(burst, burst.launchAt, aspect);
+    const apex = shellAt(burst, burstAt(burst) - 1, aspect);
+    assert.ok(launch && apex);
+    assert.ok(launch.y < 0.01, `left the floor at ${launch.y}`);
+    assert.ok(Math.abs(apex.y - burst.burstY) < 0.01, `stopped short at ${apex.y}`);
+    // A shell slows as it climbs, so it covers less ground in the last half.
+    const middle = shellAt(burst, (burst.launchAt + burstAt(burst)) / 2, aspect);
+    assert.ok(middle && middle.y > burst.burstY / 2, `only ${middle?.y} up at half time`);
+  });
+
+  /** A display ends on everything left in the mortars going up together. */
+  it('saves its heaviest shells for a finale', () => {
+    const show = createShow('spin-abc');
+    assert.ok(show.length >= 12, `only ${show.length} shells`);
+
+    // Shells are built in launch order, so the finale is the tail of the list.
+    const finale = show.slice(-3);
+    assert.ok(
+      finale.every((b) => b.heavy),
+      'the show does not end on its heavy shells',
+    );
+    const spread = finale[finale.length - 1].launchAt - finale[0].launchAt;
+    assert.ok(spread <= 400, `the finale took ${spread}ms to go up`);
+    for (const burst of finale) {
+      assert.ok(burst.sparks > 30, `a finale shell with ${burst.sparks} stars`);
+    }
+  });
+
+  it('runs a shockwave out of each flash and stops it there', () => {
+    const burst = createShow('spin-abc')[0];
+    assert.equal(ringAt(burst, burstAt(burst) - 1), null);
+    assert.equal(ringAt(burst, burstAt(burst) + RING_MS), null);
+
+    let previous = -1;
+    for (let since = 0; since < RING_MS; since += 20) {
+      const ring = ringAt(burst, burstAt(burst) + since);
+      assert.ok(ring, `no ring ${since}ms in`);
+      assert.ok(ring.radius > previous, `ring shrank at ${since}ms`);
+      previous = ring.radius;
+    }
+
+    // The ring is a shockwave, not a wall the stars sit inside: it has to run
+    // out ahead of them and be gone before they have spread that far.
+    const ahead = sparksAt(burst, burstAt(burst) + RING_MS / 2, aspect);
+    const origin = burst.burstX * aspect;
+    const reach = Math.max(...ahead.map((s) => Math.abs(s.x - origin)));
+    assert.ok(previous > reach, `stars at ${reach} overtook a ring at ${previous}`);
+  });
+
+  it('throws sparks out of the burst and then lets them fall', () => {
+    const burst = createShow('spin-abc')[0];
+    const flash = sparksAt(burst, burstAt(burst), aspect);
+    assert.equal(flash.length, burst.sparks);
+
+    const origin = burst.burstX * aspect;
+    for (const spark of flash) {
+      assert.ok(Math.abs(spark.x - origin) < 0.01, `spark started at ${spark.x}`);
+      assert.ok(Math.abs(spark.y - burst.burstY) < 0.01, `spark started at ${spark.y}`);
+    }
+
+    const open = sparksAt(burst, burstAt(burst) + 150, aspect);
+    const spread = Math.max(...open.map((s) => Math.abs(s.x - origin)));
+    assert.ok(spread > 0.02, `sparks only reached ${spread}`);
+
+    // Gravity has the last word: by the end the cloud's centre is below the
+    // height it went off at.
+    const dying = sparksAt(burst, burstAt(burst) + burst.life - 1, aspect);
+    const mean = dying.reduce((sum, s) => sum + s.y, 0) / dying.length;
+    assert.ok(mean < burst.burstY, `cloud sat at ${mean}, burst at ${burst.burstY}`);
+    assert.ok(dying.every((s) => s.age > 0.98), 'the last sparks are not spent');
+  });
+});
+
+describe('where a spin comes to rest', () => {
+  const ids = Array.from({ length: 200 }, (_, i) => `spin-${i}`);
+  const counts = [1, 2, 3, 5, 6, 8, 12, 20];
+
+  it('offsets the same spin the same way everywhere', () => {
+    assert.equal(landingOffset('spin-abc', 6), landingOffset('spin-abc', 6));
+    assert.notEqual(landingOffset('spin-abc', 6), landingOffset('spin-xyz', 6));
+  });
+
+  /**
+   * The whole point of landing near a cut is that it is still obvious which
+   * side of it the wheel came down on.
+   */
+  it('always leaves the pointer clear of the cut by the guard', () => {
+    for (const count of counts) {
+      const half = 180 / count;
+      for (const id of ids) {
+        const gap = half - Math.abs(landingOffset(id, count));
+        assert.ok(
+          gap >= edgeGuard(count) - 1e-9,
+          `${id} on ${count} stopped ${gap.toFixed(2)}° from the cut`,
+        );
+      }
+    }
+  });
+
+  it('still parks the winner under the pointer, offset and all', () => {
+    for (const count of counts) {
+      for (let index = 0; index < count; index += 1) {
+        for (const from of [0, 17.5, 359, 1234.5, -500]) {
+          const id = `s${index}-${count}`;
+          const turns = turnsFor(id);
+          const target = spinTarget(from, index, count, turns, landingOffset(id, count));
+          assert.equal(
+            segmentUnderPointer(target, count),
+            index,
+            `${id} from ${from} landed on the wrong name`,
+          );
+          const travel = target - from;
+          assert.ok(
+            travel >= 360 * turns && travel < 360 * (turns + 1),
+            `${id} from ${from} travelled ${travel}`,
+          );
+        }
+      }
+    }
+  });
+
+  /**
+   * A near-edge landing is the point of the exercise, so most spins have to
+   * actually be near an edge — and both edges have to see traffic, or every
+   * draw would creep over the line from the same side.
+   */
+  it('lands out near the cuts far more often than in the middle', () => {
+    const room = 180 / 6 - edgeGuard(6);
+    const offsets = ids.map((id) => landingOffset(id, 6));
+    const outer = offsets.filter((o) => Math.abs(o) > room * 0.6).length;
+    assert.ok(outer > ids.length * 0.5, `only ${outer} of ${ids.length} landed wide`);
+
+    const middling = offsets.filter((o) => Math.abs(o) < room * 0.2).length;
+    assert.ok(middling > 0, 'no spin ever stops near the middle of its wedge');
+
+    const over = offsets.filter((o) => o > 0).length;
+    assert.ok(over > 60 && over < 140, `${over} of ${ids.length} went to the same side`);
   });
 });

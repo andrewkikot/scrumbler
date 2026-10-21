@@ -1,8 +1,65 @@
 'use client';
 
 import { useCallback, useState, type CSSProperties } from 'react';
+import { Fireworks } from '@/components/Fireworks';
 import { Wheel, type SpinResult } from '@/components/Wheel';
 import type { RoomController } from '@/hooks/useRoom';
+
+/**
+ * A four-pointed pixel star, drawn rather than typed: the display face is a
+ * bitmap one and has no glyph for ★, and a fallback font's would be a smooth
+ * curve sitting next to hand-set squares. 4× scale keeps every pixel square.
+ */
+function Sparkle({
+  size = 20,
+  className,
+  delay,
+}: {
+  /** Keep this a multiple of 5 — the viewBox is 5 wide, and a fractional
+      scale would resample squares that are the whole point. */
+  size?: number;
+  className?: string;
+  delay?: number;
+}) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 5 5"
+      className={`pixel-art shrink-0 ${className ?? ''}`}
+      style={delay ? { animationDelay: `${delay}ms` } : undefined}
+      aria-hidden
+    >
+      <rect x="2" y="0" width="1" height="5" fill="currentColor" />
+      <rect x="0" y="2" width="5" height="1" fill="currentColor" />
+      <rect x="1" y="1" width="3" height="3" fill="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * The menu cursor that marks the newest draw — a stepped triangle at 2× the
+ * source grid, the same scale the wheel's own pointer is drawn at, so its
+ * diagonal is a staircase rather than a smooth hypotenuse. It is rendered on
+ * every row and only made visible on the first, so the names below it keep a
+ * single left edge.
+ */
+function Caret({ visible }: { visible: boolean }) {
+  return (
+    <svg
+      width="8"
+      height="14"
+      viewBox="0 0 4 7"
+      className={`pixel-art shrink-0 self-center ${visible ? '' : 'invisible'}`}
+      aria-hidden
+    >
+      <rect x="0" y="0" width="1" height="7" fill="currentColor" />
+      <rect x="1" y="1" width="1" height="5" fill="currentColor" />
+      <rect x="2" y="2" width="1" height="3" fill="currentColor" />
+      <rect x="3" y="3" width="1" height="1" fill="currentColor" />
+    </svg>
+  );
+}
 
 /** Reads "3 minutes ago" without pulling in a date library. */
 function ago(iso: string): string {
@@ -21,7 +78,15 @@ export function WheelPanel({ room }: { room: RoomController }) {
   // Which spin the wheel has finished animating. Comparing it to the spin the
   // server reports tells us whether the wheel is still turning — no timers, and
   // nothing impure read during render.
-  const [settled, setSettled] = useState<{ id: string; winner: string } | null>(null);
+  const [settled, setSettled] = useState<{ id: string; winner: string; fresh: boolean } | null>(
+    null,
+  );
+  /**
+   * The spin currently being cheered, if any. Only a draw this client actually
+   * watched land gets fireworks: letting them off for a result that was already
+   * decided would celebrate every page refresh.
+   */
+  const [celebrating, setCelebrating] = useState<string | null>(null);
 
   const activeCount = state.wheel.filter((e) => e.active).length;
 
@@ -69,10 +134,12 @@ export function WheelPanel({ room }: { room: RoomController }) {
    */
   const handleSettled = useCallback(
     ({ spinId, winnerLabel, fresh }: SpinResult) => {
-      setSettled({ id: spinId, winner: winnerLabel });
+      setSettled({ id: spinId, winner: winnerLabel, fresh });
       // `fresh` is false for a spin restored on load — acting on that would
       // bench somebody every time the page was refreshed.
-      if (!fresh || !state.settings.dropWinnerAfterSpin) return;
+      if (!fresh) return;
+      setCelebrating(spinId);
+      if (!state.settings.dropWinnerAfterSpin) return;
       void room.settleSpin();
     },
     [state.settings.dropWinnerAfterSpin, room],
@@ -111,6 +178,18 @@ export function WheelPanel({ room }: { room: RoomController }) {
           Daily lead wheel
         </h2>
 
+        {/* Fireworks go off over the whole window — they are fixed, so the
+            element only lives here, not the show — and take themselves down
+            when the last ember is out. Keyed on the spin, so a second draw
+            during the show restarts it rather than joining it. */}
+        {celebrating && (
+          <Fireworks
+            key={celebrating}
+            seed={celebrating}
+            onDone={() => setCelebrating(null)}
+          />
+        )}
+
         <Wheel entries={state.wheel} spin={state.spin} onSpinSettled={handleSettled} />
 
         <div aria-live="polite" className="min-h-[76px] text-center">
@@ -119,10 +198,22 @@ export function WheelPanel({ room }: { room: RoomController }) {
               Spinning…
             </p>
           ) : announced ? (
-            <div className="px-pop">
+            /* The stars stay once the show is over — only the winking stops —
+               so nothing shifts under the reader when the fireworks end. The
+               entrance is keyed off the draw rather than off `celebrating`
+               for the same reason: tied to the latter, the name popped a
+               second time as the last ember went out. */
+            <div className={settled?.fresh ? 'px-fanfare' : 'px-pop'}>
               <p className="text-[13px] text-[color:var(--color-ink-dim)]">Running the next daily</p>
-              <p className="font-display text-[30px] leading-tight text-[color:var(--color-gold)]">
+              <p
+                className="font-display flex items-center justify-center gap-3 text-[44px] leading-tight text-[color:var(--color-gold)]"
+                /* Hard offset, no blur: the same depth every panel and key in
+                   the app is built from, at the size this type is set. */
+                style={{ textShadow: '3px 3px 0 var(--color-void-deep)' }}
+              >
+                <Sparkle size={25} className={celebrating ? 'px-twinkle' : undefined} />
                 {announced}
+                <Sparkle size={25} className={celebrating ? 'px-twinkle' : undefined} delay={240} />
               </p>
               {/* The same public Drop as in the roster, put where you are
                   already looking. It only appears at all when the automatic
@@ -288,14 +379,43 @@ export function WheelPanel({ room }: { room: RoomController }) {
               Recent draws
             </h3>
             <ol className="flex flex-col gap-1">
-              {history.map((entry) => (
-                <li key={entry.id} className="flex items-baseline justify-between gap-3 text-[14px]">
-                  <span className="truncate">{entry.winnerLabel}</span>
-                  <span className="shrink-0 text-[12px] text-[color:var(--color-ink-dim)]">
-                    {ago(entry.createdAt)}
-                  </span>
-                </li>
-              ))}
+              {history.map((entry, index) => {
+                /*
+                 * The list is newest first, so the top row is the draw the
+                 * room is living with — the one being asked "who is running
+                 * this?" — and it is worth more than its position in a list.
+                 * It keeps the gold the winner's name has on the stage, and
+                 * the cursor pointing at it is the same shape the wheel's own
+                 * pointer is drawn in.
+                 *
+                 * `px-pop` plays once, on mount: a row already on screen is
+                 * not remounted when another joins above it, so only a draw
+                 * that has just landed actually pops.
+                 */
+                const latest = index === 0;
+                return (
+                  <li
+                    key={entry.id}
+                    className={`flex items-baseline gap-2 text-[14px] ${
+                      latest ? 'px-pop text-[color:var(--color-gold)]' : ''
+                    }`}
+                  >
+                    <Caret visible={latest} />
+                    <span className={`truncate ${latest ? 'font-semibold' : ''}`}>
+                      {entry.winnerLabel}
+                    </span>
+                    {/* The gold and the cursor say "most recent" to anyone who
+                        can see them; this says it to everyone else. */}
+                    {latest && <span className="sr-only">— latest draw</span>}
+                    {/* The times stay one colour down the column, marked row
+                        or not: the accent belongs on the name, and a gold
+                        timestamp beside dim ones only breaks the column. */}
+                    <span className="ml-auto shrink-0 text-[12px] text-[color:var(--color-ink-dim)]">
+                      {ago(entry.createdAt)}
+                    </span>
+                  </li>
+                );
+              })}
             </ol>
           </section>
         )}

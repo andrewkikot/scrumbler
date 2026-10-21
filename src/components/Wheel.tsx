@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { SPIN_DURATION_MS, type SpinView, type WheelEntryView } from '@/lib/types';
 import {
   droppedIndex,
+  landingOffset,
   segmentCenter,
   segmentUnderPointer,
   spinProgress,
@@ -435,7 +436,13 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
       arcRef.current = {
         key: arcKey,
         from,
-        target: spinTarget(from, winnerIndex, count, turnsFor(spinId)),
+        target: spinTarget(
+          from,
+          winnerIndex,
+          count,
+          turnsFor(spinId),
+          landingOffset(spinId, count),
+        ),
       };
     }
     const { from, target } = arcRef.current;

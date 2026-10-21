@@ -25,11 +25,61 @@ export function segmentCenter(index: number, count: number): number {
 }
 
 /**
- * The rotation that leaves `index` under the pointer, after `turns` full
- * revolutions.
+ * Degrees of wedge that must stay between the pointer and the cut it is
+ * nearest to.
+ *
+ * The pointer is a wide arrow biting into the rim, not a hairline, and the
+ * whole point of a near-edge landing is lost if the room cannot tell which
+ * side of the cut it came down on. The cap matters on a crowded wheel, where
+ * a share of the wedge is barely a degree.
  */
-export function restAngle(index: number, count: number, turns: number): number {
-  return 360 * turns - segmentCenter(index, count);
+export function edgeGuard(count: number): number {
+  return Math.min((360 / count) * 0.28, 8);
+}
+
+/**
+ * How far off the centre of its wedge a spin comes to rest, in degrees.
+ *
+ * A wheel that stops dead centre every time has no last moment: by the time
+ * the final cut has passed the pointer, everyone can see there is room to
+ * spare. Landing near a cut instead — just over it, or only just short of the
+ * next one — is where the drama of a wheel actually lives.
+ *
+ * Derived from the spin id, like the turn count, so every client comes to rest
+ * in exactly the same place. Salted so that it is not a function of the turn
+ * count: the same id must not always mean "long spin, early edge".
+ */
+export function landingOffset(spinId: string, count: number): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < spinId.length; i += 1) {
+    hash = (Math.imul(hash, 16777619) ^ spinId.charCodeAt(i)) >>> 0;
+  }
+  // Avalanche, because the landing is read off the *low* bits. Ids from one
+  // room differ only in their last characters, and without this the wheel
+  // favoured the same corner of a wedge draw after draw.
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b) >>> 0;
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35) >>> 0;
+  hash = (hash ^ (hash >>> 16)) >>> 0;
+
+  const room = Math.max(0, 180 / count - edgeGuard(count));
+  // −1…1, in thousandths so the arithmetic stays exact across clients.
+  const u = ((hash % 2001) - 1000) / 1000;
+  // The exponent is what does the work: raising a magnitude under 1 to a
+  // fractional power pushes it outwards, so most landings sit in the outer
+  // part of the wedge and only a few come down near the middle.
+  return Math.sign(u) * Math.abs(u) ** 0.4 * room;
+}
+
+/**
+ * The rotation that leaves `index` under the pointer, after `turns` full
+ * revolutions. `offset` slides the landing within the wedge — positive
+ * towards the cut the pointer crossed last, negative towards the one it did
+ * not reach.
+ */
+export function restAngle(index: number, count: number, turns: number, offset = 0): number {
+  return 360 * turns - segmentCenter(index, count) + offset;
 }
 
 /** Which segment is under the pointer at a given rotation. */
@@ -120,8 +170,14 @@ export function windupDeg(t: number): number {
  * run backwards into the result. This slides the landing forward by whole
  * turns until the wheel has at least `turns` revolutions left to travel.
  */
-export function spinTarget(from: number, index: number, count: number, turns: number): number {
-  const rest = restAngle(index, count, turns);
+export function spinTarget(
+  from: number,
+  index: number,
+  count: number,
+  turns: number,
+  offset = 0,
+): number {
+  const rest = restAngle(index, count, turns, offset);
   // Whole turns first, then the shortest forward hop onto an angle that puts
   // the winner under the pointer. Every spin is then `turns` revolutions plus
   // at most one more, whatever the wheel was left sitting at.

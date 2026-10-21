@@ -429,6 +429,20 @@
   animation: px-pop 240ms steps(3, end) both;
 }
 
+/*
+ * The winner's name landing. A louder px-pop: it overshoots, undershoots and
+ * settles, in six visible steps rather than three — this is the one moment in
+ * the app worth shouting about, and the fireworks behind it are shouting.
+ */
+@utility px-fanfare {
+  animation: px-fanfare 520ms steps(6, end) both;
+}
+
+/* The pixel stars flanking that name, winking while the show is on. */
+@utility px-twinkle {
+  animation: px-twinkle 480ms steps(2, end) infinite;
+}
+
 @utility px-blink {
   animation: px-blink 1s steps(2, end) infinite;
 }
@@ -454,6 +468,37 @@
   }
   100% {
     transform: scale(1);
+  }
+}
+
+@keyframes px-fanfare {
+  0% {
+    transform: scale(0.55);
+  }
+  35% {
+    transform: scale(1.3);
+  }
+  60% {
+    transform: scale(0.92);
+  }
+  80% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes px-twinkle {
+  0%,
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50.01%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.75);
   }
 }
 
