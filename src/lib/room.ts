@@ -1,10 +1,11 @@
+import { Prisma } from '@prisma/client';
 import { publish } from './bus';
 import { prisma } from './db';
 import { resolveDeck, type DeckKey } from './decks';
 import { secretEquals } from './secret';
 import { computeStats } from './stats';
 import { timerView } from './timer';
-import { ONLINE_WINDOW_MS, SPIN_HISTORY_LIMIT, type RoomState } from './types';
+import { ABSENT_DROP_MS, ONLINE_WINDOW_MS, SPIN_HISTORY_LIMIT, type RoomState } from './types';
 
 /** Cheap single-column read used by the SSE loop on every poll tick. */
 export async function getRoomVersion(slug: string): Promise<number | null> {
@@ -50,6 +51,42 @@ export function isAdmin(request: Request, adminToken: string): boolean {
 export async function bumpAndPublish(roomId: string, slug: string): Promise<void> {
   await prisma.room.update({ where: { id: roomId }, data: { version: { increment: 1 } } });
   publish(slug);
+}
+
+/**
+ * Take everyone silent for `ABSENT_DROP_MS` out of the room — or out of every
+ * room, when no `roomId` is given — and return how many left, so the caller
+ * knows whether to publish. Their votes cascade.
+ *
+ * Except a card on a revealed table. Somebody whose laptop slept through the
+ * discussion still voted, and the result must not change under the people
+ * talking about it. They stay, shown as away, until the room moves on to the
+ * next round (or hides this one), and leave on the sweep after that. Only the
+ * room's current round counts: older rounds are kept too, and a vote in one of
+ * those would otherwise hold a seat forever.
+ *
+ * There is no timer behind this: serverless has nowhere to keep one. Instead
+ * the room sweeps itself whenever somebody in it heartbeats or joins, so it
+ * runs every few seconds while the room is in use — and while nobody is in it,
+ * nobody is watching the seats either. The daily cleanup sweeps every room, for
+ * the ones everybody has left.
+ */
+export async function dropAbsent(roomId?: string, now = Date.now()): Promise<number> {
+  const cutoff = new Date(now - ABSENT_DROP_MS);
+  return prisma.$executeRaw`
+    DELETE FROM "Participant" p
+    WHERE p."lastSeenAt" < ${cutoff}
+      ${roomId ? Prisma.sql`AND p."roomId" = ${roomId}` : Prisma.empty}
+      AND NOT EXISTS (
+        SELECT 1 FROM "Vote" v
+        JOIN "Round" r ON r."id" = v."roundId"
+        WHERE v."participantId" = p."id"
+          AND r."revealed"
+          AND NOT EXISTS (
+            SELECT 1 FROM "Round" later
+            WHERE later."roomId" = r."roomId" AND later."number" > r."number"
+          )
+      )`;
 }
 
 /** The current round is simply the highest-numbered one; created on demand. */

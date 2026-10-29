@@ -10,7 +10,8 @@ import { prisma } from './db';
  *
  *   1. a global brake on new rooms per hour, whoever is asking;
  *   2. per-IP rate limits on creating rooms and taking seats;
- *   3. per-room caps, so one room cannot be stuffed even slowly;
+ *   3. per-room caps, so one room cannot be stuffed even slowly — and a seat
+ *      nobody heartbeats from leaves after ABSENT_DROP_MS (see `dropAbsent`);
  *   4. a daily cleanup (see /api/cron/cleanup) for what gets through anyway.
  */
 
@@ -25,13 +26,6 @@ export const RATE_LIMITS = {
 
 export const MAX_PARTICIPANTS_PER_ROOM = 50;
 export const MAX_WHEEL_ENTRIES_PER_ROOM = 100;
-
-/**
- * A seat nobody has heartbeated from in this long is somebody who left without
- * pressing Leave. The cleanup clears them daily, and a full room clears its own
- * on the spot rather than turning away someone who is actually here.
- */
-export const STALE_PARTICIPANT_DAYS = 30;
 
 /**
  * A room nobody has done anything in (version 0) since it was created. A week,

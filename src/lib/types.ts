@@ -93,6 +93,15 @@ export type RoomState = {
 /** Milliseconds of silence after which a participant is shown as away. */
 export const ONLINE_WINDOW_MS = 45_000;
 
+/**
+ * Milliseconds of silence after which a participant leaves the room, seat and
+ * vote — unless that vote is on a revealed table (see `dropAbsent`). Away is a
+ * blip; this is somebody who closed the lid. A hidden tab still pings (browsers
+ * throttle it to once a minute, not to never), so only a closed tab or a
+ * sleeping machine gets this far.
+ */
+export const ABSENT_DROP_MS = 30 * 60_000;
+
 /** How long the wheel animation runs, shared by server and client. */
 export const SPIN_DURATION_MS = 8000;
 
