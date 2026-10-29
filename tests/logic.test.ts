@@ -11,6 +11,7 @@ import {
   sparksAt,
 } from '../src/lib/fireworks';
 import { slugifyName } from '../src/lib/ids';
+import { drawPool, settleRotation, type RotationEntry } from '../src/lib/rotation';
 import { computeStats } from '../src/lib/stats';
 import {
   droppedIndex,
@@ -498,5 +499,171 @@ describe('where a spin comes to rest', () => {
 
     const over = offsets.filter((o) => o > 0).length;
     assert.ok(over > 60 && over < 140, `${over} of ${ids.length} went to the same side`);
+  });
+});
+
+describe('a rotation settling after a draw', () => {
+  const roster = (...on: string[]): RotationEntry[] =>
+    ['Ana', 'Bo', 'Kim'].map((label) => ({
+      id: label.toLowerCase(),
+      label,
+      active: on.includes(label),
+    }));
+
+  /** Mid-rotation there is nothing clever to do: the winner has had a turn. */
+  it('takes the winner off a wheel that still has names on it', () => {
+    assert.deepEqual(settleRotation(roster('Ana', 'Bo', 'Kim'), 'Bo'), {
+      activate: [],
+      deactivate: ['bo'],
+      heldOver: null,
+    });
+  });
+
+  /**
+   * The whole point: the wheel does not end up empty, it ends up full. The name
+   * that closed the rotation goes back on with everybody else — it is the next
+   * draw that skips them, not the wheel that benches them.
+   */
+  it('refills the wheel with everyone when the last name goes', () => {
+    assert.deepEqual(settleRotation(roster('Kim'), 'Kim'), {
+      activate: ['ana', 'bo'],
+      deactivate: [],
+      heldOver: 'Kim',
+    });
+  });
+
+  /** Everybody already off, and a draw settles: same thing, nobody to drop. */
+  it('refills a wheel that was already empty', () => {
+    assert.deepEqual(settleRotation(roster(), 'Kim'), {
+      activate: ['ana', 'bo', 'kim'],
+      deactivate: [],
+      heldOver: 'Kim',
+    });
+  });
+
+  /** A wheel of one has nobody to skip to, so it holds nobody and never dies. */
+  it('refills a one-name wheel with that name, and holds nobody', () => {
+    const solo = [{ id: 'a', label: 'Ana', active: true }];
+    assert.deepEqual(settleRotation(solo, 'Ana'), {
+      activate: [],
+      deactivate: [],
+      heldOver: null,
+    });
+  });
+
+  /** The winner removed between the draw and the settle: refill, hold nobody. */
+  it('refills when the winner is no longer on the roster at all', () => {
+    const gone: RotationEntry[] = [
+      { id: 'ana', label: 'Ana', active: false },
+      { id: 'bo', label: 'Bo', active: false },
+    ];
+    assert.deepEqual(settleRotation(gone, 'Kim'), {
+      activate: ['ana', 'bo'],
+      deactivate: [],
+      heldOver: null,
+    });
+  });
+});
+
+describe('who is in a draw', () => {
+  const wheel = [{ label: 'Ana' }, { label: 'Bo' }, { label: 'Kim' }];
+
+  it('is everyone on the wheel when nobody is held over', () => {
+    assert.deepEqual(drawPool(wheel, null), wheel);
+  });
+
+  it('skips the name the last rotation held over', () => {
+    assert.deepEqual(drawPool(wheel, 'Bo'), [{ label: 'Ana' }, { label: 'Kim' }]);
+  });
+
+  /** A name dropped since the refill is not on the wheel to be skipped. */
+  it('ignores a hold on a name that is not in the draw', () => {
+    assert.deepEqual(drawPool(wheel, 'Dev'), wheel);
+  });
+
+  /**
+   * The hold must never empty the draw. Everyone else dropped since the refill
+   * leaves nobody to skip to, and a wheel that cannot be spun is worse than a
+   * repeat.
+   */
+  it('gives way rather than leave a wheel that cannot be spun', () => {
+    assert.deepEqual(drawPool([{ label: 'Bo' }], 'Bo'), [{ label: 'Bo' }]);
+  });
+});
+
+describe('a rotation run end to end', () => {
+  /*
+    The two things the rotation actually promises, played out rather than
+    reasoned about: run a wheel for hundreds of draws and nobody leads two
+    dailies running, everybody gets about the same number of turns, and the
+    wheel is never left empty or unspinnable. Both halves are in the loop —
+    the draw skips who it must, the settle refills — and every draw is settled
+    twice, as two clients watching the same wheel would.
+  */
+  it('keeps its promises over hundreds of draws', () => {
+    for (const size of [1, 2, 3, 5, 8]) {
+      const names = Array.from({ length: size }, (_, i) => String.fromCharCode(65 + i));
+
+      for (let seed = 1; seed <= 8; seed += 1) {
+        let rng = seed;
+        const pick = (n: number) => {
+          rng = (rng * 1103515245 + 12345) % 2147483648;
+          return rng % n;
+        };
+
+        let wheel: RotationEntry[] = names.map((label) => ({ id: label, label, active: true }));
+        let held: string | null = null;
+        let settledDraw = -1;
+        const drawn: string[] = [];
+
+        for (let draw = 0; draw < 200; draw += 1) {
+          // ---- the spin route ----
+          const on = wheel.filter((e) => e.active);
+          assert.ok(on.length > 0, `size ${size} seed ${seed}: the wheel ran dry`);
+          const pool = drawPool(on, held);
+          assert.ok(pool.length > 0, `size ${size} seed ${seed}: the hold emptied the draw`);
+          const winner = pool[pick(pool.length)];
+          drawn.push(winner.label);
+          held = null; // a hold is one draw long, and this was it
+
+          // ---- the settle route, twice, as two clients would ----
+          for (let client = 0; client < 2; client += 1) {
+            if (settledDraw === draw) continue;
+            const settled = settleRotation(wheel, winner.label);
+            wheel = wheel.map((e) => ({
+              ...e,
+              active: settled.activate.includes(e.id)
+                ? true
+                : settled.deactivate.includes(e.id)
+                  ? false
+                  : e.active,
+            }));
+            held = settled.heldOver;
+            settledDraw = draw;
+          }
+
+          // The refill is all-in: a rotation never closes onto a part-full wheel.
+          if (held !== null) {
+            assert.ok(
+              wheel.every((e) => e.active),
+              `size ${size} seed ${seed}: the refill left somebody off`,
+            );
+          }
+        }
+
+        // A wheel of one has nobody to alternate with; any more does.
+        if (size > 1) {
+          const repeat = drawn.findIndex((label, i) => i > 0 && label === drawn[i - 1]);
+          assert.equal(repeat, -1, `size ${size} seed ${seed}: a repeat at draw ${repeat}`);
+        }
+
+        const turns = names.map((name) => drawn.filter((d) => d === name).length);
+        // One rotation of slack: a wheel caught mid-rotation is not yet even.
+        assert.ok(
+          Math.max(...turns) - Math.min(...turns) <= 2,
+          `size ${size} seed ${seed}: uneven turns ${turns.join(',')}`,
+        );
+      }
+    }
   });
 });

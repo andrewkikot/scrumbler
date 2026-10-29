@@ -133,6 +133,7 @@ export async function getRoomState(
     myVote: viewer ? (voteByParticipant.get(viewer.id)?.value ?? null) : null,
     stats: round?.revealed ? computeStats(round.votes, eligible, deck) : null,
     wheel: room.wheelEntries.map((w) => ({ id: w.id, label: w.label, active: w.active })),
+    wheelHeldOver: room.wheelHeldOverLabel,
     spin: latestSpin
       ? { id: latestSpin.id, winnerLabel: latestSpin.winnerLabel, startedAt: latestSpin.createdAt.getTime() }
       : null,

@@ -151,6 +151,29 @@ and a late joiner sees the result rather than a replay.
 Wheel names are **not** tied to participants on purpose: someone on holiday, or
 who never opens the room, can still be in (or benched from) the rotation.
 
+### The rotation refills itself
+
+With `dropWinnerAfterSpin` on — the default — each draw takes the winner off the
+wheel, so over a sprint everybody leads exactly once. When the last name goes,
+the wheel does not sit empty waiting for twelve names to be added back by hand:
+the whole roster goes straight back on for the next rotation.
+
+Everybody goes back on, the name that just led included — it is the next **draw**
+that skips them, not the wheel that benches them. Drawn again immediately they
+would run two dailies in a row, which is the one thing a rotation exists to
+prevent; so that one spin passes over them, and they are in the running again
+from the spin after. Their wedge is on the wheel throughout.
+
+An exclusion the room cannot see is just a weighted roll, so the roster marks
+that name *not this draw* and says why underneath. It is the only skip in the
+app: a *standing* "never the last leader" is still not on offer, and the draw is
+otherwise uniform over everyone on the wheel.
+
+`src/lib/rotation.ts` holds both halves as pure functions — `settleRotation` for
+what the roster looks like after a draw, `drawPool` for who is in the next one —
+so the policy is checked without a database. The routes only apply what they
+return.
+
 ---
 
 ## Running it locally
@@ -281,13 +304,14 @@ src/
     cleanup.ts           what the daily sweep deletes
     stats.ts             vote maths
     wheel.ts             wheel geometry
+    rotation.ts          who is on the wheel after a draw, and who the next one skips
     bus.ts               in-process pub/sub
     db.ts                Prisma client (lazy, Neon adapter)
     env.ts               connection-string resolution (prefixed names)
     superadmin.ts        the deployment-wide key and its route guard
     secret.ts            constant-time token comparison
 tests/
-  logic.test.ts          vote maths, decks, slugs, wheel geometry
+  logic.test.ts          vote maths, decks, slugs, wheel geometry, rotation
   env.test.ts            env resolution priority
   superadmin.test.ts     the super-admin key guard
   timer.test.ts          start, pause, extend, overtime, clock face

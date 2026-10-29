@@ -42,6 +42,22 @@ model Room {
   /// Applied by whichever client watched the wheel stop, never at spin time —
   /// see the settle route for why.
   dropWinnerAfterSpin Boolean @default(true)
+  /// The name the next draw must skip, or null when there is none.
+  ///
+  /// Set when a shrinking wheel empties and refills itself. Everybody goes back
+  /// on the wheel, that name included — it is the draw that skips them, not the
+  /// wheel, so that nobody leads two dailies running across the seam. The spin
+  /// route clears it as it serves it: a hold is one draw long. A label rather
+  /// than an id because that is what a spin records, and labels are unique per
+  /// room anyway.
+  wheelHeldOverLabel String?
+  /// The spin the wheel roster has already been settled for.
+  ///
+  /// Every client watching a wheel asks the settle route to apply the result,
+  /// so all but the first must find the work done. The roster alone cannot say
+  /// whether it was: a rotation that has closed puts the winner back on the
+  /// wheel, leaving it looking exactly like a draw nobody has settled yet.
+  wheelSettledSpinId String?
 
   // --- discussion timer (one per room, shared by everyone) ---
   /// Whether anyone in the room may start, pause and stop the timer, or only

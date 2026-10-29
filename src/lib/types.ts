@@ -71,6 +71,14 @@ export type RoomState = {
   /** Null until the round is revealed. */
   stats: RoundStats | null;
   wheel: WheelEntryView[];
+  /**
+   * The name the next draw will skip, or null when there is none. Set when a
+   * shrinking wheel refills itself: whoever closed the last rotation is back
+   * on the wheel with everybody else, and it is the one next draw that passes
+   * over them. Published because a skip nobody can see is a weighted roll —
+   * the roster marks that name, so the rule is on screen rather than hidden.
+   */
+  wheelHeldOver: string | null;
   spin: SpinView | null;
   history: { id: string; winnerLabel: string; createdAt: string }[];
   /** The shared discussion timer; null when nobody has one running. */

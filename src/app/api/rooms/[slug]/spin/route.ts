@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 import { fail, forbidden, json, notFound, route, viewerId } from '@/lib/api';
 import { prisma } from '@/lib/db';
 import { bumpAndPublish, findRoom, getRoomState, isAdmin } from '@/lib/room';
+import { drawPool } from '@/lib/rotation';
 import { SPIN_DURATION_MS, SPIN_HISTORY_LIMIT } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -48,13 +49,23 @@ export const POST = route(async (request: Request, { params }: Ctx) => {
   });
   if (entries.length === 0) return fail(409, 'Add at least one name to the wheel first');
 
+  /*
+    Every active name is in the draw, with one exception, and it lasts exactly
+    one spin: the name that closed the last rotation. The refill puts everybody
+    back on the wheel including them, so without this they could be drawn again
+    immediately and run two dailies in a row — which is the whole thing a
+    rotation is for. The roster says so out loud rather than leaving it a quiet
+    weighting nobody can see: that name is marked in the panel as skipped for
+    this draw, and is in the running again for the next.
+
+    Skipping a *standing* last winner is still not on offer. This applies only
+    across the seam of a rotation, never draw to draw.
+  */
+  const pool = drawPool(entries, room.wheelHeldOverLabel);
+
   // crypto.randomInt is uniform — Math.random() is not, and this decides who
   // runs the meeting.
-  //
-  // Every active name is in the draw, every time. Skipping the last winner used
-  // to be an option here; `dropWinnerAfterSpin` does that job properly, by
-  // taking them off the wheel rather than quietly weighting one roll.
-  const winner = entries[randomInt(entries.length)];
+  const winner = pool[randomInt(pool.length)];
 
   await prisma.spin.create({ data: { roomId: room.id, winnerLabel: winner.label } });
 
@@ -70,6 +81,13 @@ export const POST = route(async (request: Request, { params }: Ctx) => {
   if (stale.length) {
     await prisma.spin.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } });
   }
+
+  // A hold is one draw long, and this was the draw — whether or not it had
+  // anyone to skip. Clearing it unconditionally is what keeps it to one.
+  if (room.wheelHeldOverLabel !== null) {
+    await prisma.room.update({ where: { id: room.id }, data: { wheelHeldOverLabel: null } });
+  }
+
   await bumpAndPublish(room.id, slug);
 
   return json(await getRoomState(slug, viewerId(request)));

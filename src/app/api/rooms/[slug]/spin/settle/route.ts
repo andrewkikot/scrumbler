@@ -1,6 +1,7 @@
 import { json, notFound, route, viewerId } from '@/lib/api';
 import { prisma } from '@/lib/db';
 import { bumpAndPublish, findRoom, getRoomState } from '@/lib/room';
+import { settleRotation } from '@/lib/rotation';
 import { SPIN_DURATION_MS } from '@/lib/types';
 
 export const runtime = 'nodejs';
@@ -8,8 +9,10 @@ export const runtime = 'nodejs';
 type Ctx = { params: Promise<{ slug: string }> };
 
 /**
- * POST /api/rooms/:slug/spin/settle — take the winner off the wheel, once the
- * wheel has actually stopped on them.
+ * POST /api/rooms/:slug/spin/settle — settle the rotation, once the wheel has
+ * actually stopped: the winner comes off, and if that was the last name on the
+ * wheel the whole roster goes back on for the next rotation — that winner
+ * included. Who the next draw skips is recorded for the spin route to serve.
  *
  * Why this is not part of the spin route: the winner has to stay on the wheel
  * for the whole animation. Deactivating the entry at spin time publishes a
@@ -41,7 +44,7 @@ export const POST = route(async (request: Request, { params }: Ctx) => {
   const spin = await prisma.spin.findFirst({
     where: { roomId: room.id },
     orderBy: { createdAt: 'desc' },
-    select: { winnerLabel: true, createdAt: true },
+    select: { id: true, winnerLabel: true, createdAt: true },
   });
   if (!spin) return json(await state());
 
@@ -49,14 +52,58 @@ export const POST = route(async (request: Request, { params }: Ctx) => {
   // whoever the wheel is *currently* flying towards, on demand.
   if (Date.now() - spin.createdAt.getTime() < SPIN_DURATION_MS) return json(await state());
 
-  const entry = await prisma.wheelEntry.findFirst({
-    where: { roomId: room.id, label: spin.winnerLabel, active: true },
-    select: { id: true },
-  });
-  // Already benched — by the first client to get here, or by the admin's hand.
-  if (!entry) return json(await state());
+  /*
+    Already settled — by the first client to get here, and every other one is
+    this. It has to be recorded rather than read off the roster: a draw that
+    closed a rotation put its winner straight back on the wheel, so "is the
+    winner still on?" — which used to be the whole check — now says yes to a
+    draw that has been settled and a draw that has not alike, and the second
+    client through would drop that winner off the fresh wheel.
+  */
+  if (room.wheelSettledSpinId === spin.id) return json(await state());
 
-  await prisma.wheelEntry.update({ where: { id: entry.id }, data: { active: false } });
+  const roster = await prisma.wheelEntry.findMany({
+    where: { roomId: room.id },
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+    select: { id: true, label: true, active: true },
+  });
+
+  const { activate, deactivate, heldOver } = settleRotation(roster, spin.winnerLabel);
+
+  /*
+    One transaction, because a half-applied rotation is a wheel the room cannot
+    reason about: the winner off but nobody put back is a dead wheel, and a
+    roster back without the hold recorded loses the one guarantee the refill
+    exists to make.
+
+    Note what the client sees when a rotation closes: the roster goes from one
+    name straight to a full wheel, which is not a single name leaving, so the
+    wheel redraws rather than playing the wedge-drop. That is the right picture
+    anyway — the wheel does not empty, it fills.
+  */
+  await prisma.$transaction([
+    ...(deactivate.length
+      ? [
+          prisma.wheelEntry.updateMany({
+            where: { id: { in: deactivate }, roomId: room.id },
+            data: { active: false },
+          }),
+        ]
+      : []),
+    ...(activate.length
+      ? [
+          prisma.wheelEntry.updateMany({
+            where: { id: { in: activate }, roomId: room.id },
+            data: { active: true },
+          }),
+        ]
+      : []),
+    prisma.room.update({
+      where: { id: room.id },
+      data: { wheelHeldOverLabel: heldOver, wheelSettledSpinId: spin.id },
+    }),
+  ]);
+
   await bumpAndPublish(room.id, slug);
   return json(await state());
 });

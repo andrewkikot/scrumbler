@@ -91,6 +91,20 @@ export function WheelPanel({ room }: { room: RoomController }) {
   const activeCount = state.wheel.filter((e) => e.active).length;
 
   /**
+   * The name the next draw will skip, while they are on the wheel to be skipped.
+   *
+   * A rotation that has just closed puts everybody back on, that name included
+   * — their wedge is right there and the pointer can sweep over it, it simply
+   * will not come to rest there this once. Nothing on the wheel itself can show
+   * that, so the roster says it instead: an exclusion the room cannot see is
+   * just a weighted roll.
+   */
+  const heldOver =
+    state.wheelHeldOver && state.wheel.some((e) => e.label === state.wheelHeldOver && e.active)
+      ? state.wheelHeldOver
+      : null;
+
+  /**
    * Who gets the button. The room's setting decides, and the spin route makes
    * the same call server-side — this only keeps the UI honest about it.
    */
@@ -99,14 +113,19 @@ export function WheelPanel({ room }: { room: RoomController }) {
   const spinning = state.spin !== null && settled?.id !== state.spin.id;
   const announced = state.spin && settled?.id === state.spin.id ? settled.winner : null;
   /**
-   * The winner's entry, while they are still on the wheel — so the admin can
+   * The winner's entry, while they are still on the wheel — so the room can
    * drop them by hand when the automatic drop is switched off, or put them
    * back and drop somebody else. It disappears of its own accord the moment
    * they leave the wheel, whichever way they went.
+   *
+   * Only when that setting is off. With it on, a winner found still on the
+   * wheel is one the refill has just put back — offering to drop them there
+   * reads as "undo that", which is the opposite of what the button is for.
    */
-  const announcedEntry = announced
-    ? (state.wheel.find((e) => e.active && e.label === announced) ?? null)
-    : null;
+  const announcedEntry =
+    announced && !state.settings.dropWinnerAfterSpin
+      ? (state.wheel.find((e) => e.active && e.label === announced) ?? null)
+      : null;
 
   /**
    * Recent draws, minus the one the wheel is still flying towards.
@@ -302,11 +321,18 @@ export function WheelPanel({ room }: { room: RoomController }) {
                     >
                       {entry.label}
                     </span>
-                    {!entry.active && (
+                    {!entry.active ? (
                       <span className="px-chip shrink-0 text-[color:var(--color-ink-dim)]">
                         off
                       </span>
-                    )}
+                    ) : entry.label === heldOver ? (
+                      /* On the wheel, but not in this draw. Said on the row,
+                         because the wheel cannot say it — the wedge is there
+                         and looks exactly like everybody else's. */
+                      <span className="px-chip shrink-0 text-[color:var(--color-ink-dim)]">
+                        not this draw
+                      </span>
+                    ) : null}
                   </span>
                   {!readOnly && (
                     <span className="flex shrink-0 items-center gap-1">
@@ -340,6 +366,15 @@ export function WheelPanel({ room }: { room: RoomController }) {
                 </li>
               ))}
             </ul>
+          )}
+
+          {/* The chip marks the row; this says why, and that it is over almost
+              as soon as it starts. */}
+          {heldOver && (
+            <p className="mt-3 text-[13px] text-[color:var(--color-ink-dim)]">
+              {heldOver} led last, so this one draw skips them — nobody runs two
+              dailies in a row. They are in the running again from the next.
+            </p>
           )}
 
           {isAdmin && (
