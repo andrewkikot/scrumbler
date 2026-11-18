@@ -209,7 +209,12 @@ export function WheelPanel({ room }: { room: RoomController }) {
           />
         )}
 
-        <Wheel entries={state.wheel} spin={state.spin} onSpinSettled={handleSettled} />
+        <Wheel
+          entries={state.wheel}
+          spin={state.spin}
+          onSpinSettled={handleSettled}
+          clockOffset={room.clockOffset}
+        />
 
         <div aria-live="polite" className="min-h-[76px] text-center">
           {spinning ? (

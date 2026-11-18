@@ -160,9 +160,15 @@ type WheelProps = {
   spin: SpinView | null;
   /** Fired once the wheel is at rest, with the spin it came to rest on. */
   onSpinSettled?: (result: SpinResult) => void;
+  /**
+   * Server clock minus this browser's, in ms. `spin.startedAt` is stamped by
+   * the server, so a browser whose clock runs even slightly behind would see
+   * every spin as starting in the future — and skip the animation entirely.
+   */
+  clockOffset?: number;
 };
 
-export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
+export function Wheel({ entries, spin, onSpinSettled, clockOffset = 0 }: WheelProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const labelsRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef<HTMLDivElement>(null);
@@ -186,6 +192,12 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
   useEffect(() => {
     settledCallback.current = onSpinSettled;
   }, [onSpinSettled]);
+
+  // Re-measured on every stream frame, so it rides in a ref for the same reason.
+  const clockOffsetRef = useRef(clockOffset);
+  useEffect(() => {
+    clockOffsetRef.current = clockOffset;
+  }, [clockOffset]);
 
   /**
    * The names the canvas is drawn from. It deliberately lags `entries`: when
@@ -448,8 +460,14 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
     const { from, target } = arcRef.current;
     const atRest: Accent = { index: winnerIndex, offset: POP_PX, dissolve: 0 };
 
-    const elapsed = Date.now() - spinStartedAt;
-    const over = elapsed >= SPIN_DURATION_MS + POP_MS || elapsed < 0;
+    /** Now, on the server's clock — the one `spinStartedAt` was stamped with. */
+    const serverNow = () => Date.now() + clockOffsetRef.current;
+
+    // A slightly negative elapsed is just network latency eating into the
+    // offset estimate: the wheel holds at the start for those few ms rather
+    // than treating a live spin as stale.
+    const elapsed = serverNow() - spinStartedAt;
+    const over = elapsed >= SPIN_DURATION_MS + POP_MS;
 
     // A spin from an earlier session — or a viewer who asked for less motion:
     // show the result, don't play the show. A live draw still counts as fresh
@@ -471,7 +489,7 @@ export function Wheel({ entries, spin, onSpinSettled }: WheelProps) {
     let flick = 0;
 
     let frame = requestAnimationFrame(function step() {
-      const since = Date.now() - spinStartedAt;
+      const since = serverNow() - spinStartedAt;
       const t = Math.min(1, since / SPIN_DURATION_MS);
       const rotation = from + travel * spinProgress(t) - windupDeg(t);
 
