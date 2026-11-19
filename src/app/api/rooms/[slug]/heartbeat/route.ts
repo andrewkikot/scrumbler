@@ -50,19 +50,36 @@ export const POST = route(async (request: Request, { params }: Ctx) => {
   // Someone long gone just lost their seat; theirs may have been the missing vote.
   if (dropped > 0) await autoRevealCurrentRound(room.id);
 
+  // Somebody went quiet since the room last pushed its state, so every screen
+  // still shows them online — and "waiting for Bo (away)" would say "Bo". The
+  // window starts at the last push (`updatedAt`), so each going-away is pushed
+  // once, by the first ping after it, however many people are pinging.
+  const awayCutoff = new Date(Date.now() - ONLINE_WINDOW_MS);
+  const wentAway = await prisma.participant.findFirst({
+    where: {
+      roomId: room.id,
+      lastSeenAt: {
+        lt: awayCutoff,
+        gte: new Date(room.updatedAt.getTime() - ONLINE_WINDOW_MS),
+      },
+    },
+    select: { id: true },
+  });
+  const presenceChanged = dropped > 0 || wentAway !== null;
+
   const participant = await prisma.participant.findUnique({
     where: { roomId_clientId: { roomId: room.id, clientId: body.data.clientId } },
     select: { id: true, lastSeenAt: true },
   });
   if (!participant) {
-    if (dropped > 0) await bumpAndPublish(room.id, slug);
+    if (presenceChanged) await bumpAndPublish(room.id, slug);
     return json({ known: false, participantId: null });
   }
 
   const wasAway = Date.now() - participant.lastSeenAt.getTime() >= ONLINE_WINDOW_MS;
   await prisma.participant.update({ where: { id: participant.id }, data: { lastSeenAt: new Date() } });
 
-  if (wasAway || dropped > 0) await bumpAndPublish(room.id, slug);
+  if (wasAway || presenceChanged) await bumpAndPublish(room.id, slug);
 
   return json({ known: true, participantId: participant.id, version: room.version });
 });
