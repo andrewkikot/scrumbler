@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { fail, forbidden, json, notFound, readBody, route, viewerId } from '@/lib/api';
 import { prisma } from '@/lib/db';
-import { bumpAndPublish, findRoom, getRoomState, isAdmin } from '@/lib/room';
+import { autoRevealCurrentRound, bumpAndPublish, findRoom, getRoomState, isAdmin } from '@/lib/room';
 
 export const runtime = 'nodejs';
 
@@ -36,6 +36,8 @@ export const PATCH = route(async (request: Request, { params }: Ctx) => {
   }
 
   await prisma.participant.update({ where: { id: participant.id }, data });
+  // Becoming a spectator can leave everyone still playing already voted.
+  if (data.isSpectator !== undefined) await autoRevealCurrentRound(room.id);
   await bumpAndPublish(room.id, slug);
   return json(await getRoomState(slug, viewerId(request)));
 });
@@ -55,6 +57,8 @@ export const DELETE = route(async (request: Request, { params }: Ctx) => {
   if (!allowed) return forbidden('You can only remove yourself');
 
   await prisma.participant.delete({ where: { id: participant.id } });
+  // The one vote everybody was waiting on may have just left the table.
+  await autoRevealCurrentRound(room.id);
   await bumpAndPublish(room.id, slug);
   return json({ deleted: true, state: await getRoomState(slug, viewerId(request)) });
 });

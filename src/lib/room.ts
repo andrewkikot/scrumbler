@@ -116,6 +116,21 @@ export async function dropAbsent(roomId?: string, now = Date.now()): Promise<num
       )`;
 }
 
+/**
+ * Re-check auto-reveal after the table shrank or changed — someone was dropped,
+ * removed, or made a spectator — since the last missing vote may have just left.
+ * Only runs on those rare events, never per heartbeat. True when it revealed.
+ */
+export async function autoRevealCurrentRound(roomId: string): Promise<boolean> {
+  const round = await prisma.round.findFirst({
+    where: { roomId },
+    orderBy: { number: 'desc' },
+    select: { id: true, revealed: true },
+  });
+  if (!round || round.revealed) return false;
+  return maybeAutoReveal(roomId, round.id);
+}
+
 /** The current round is simply the highest-numbered one; created on demand. */
 export async function currentRound(roomId: string) {
   const existing = await prisma.round.findFirst({ where: { roomId }, orderBy: { number: 'desc' } });
@@ -159,9 +174,8 @@ export async function getRoomState(
     value: round?.revealed ? (voteByParticipant.get(p.id)?.value ?? null) : null,
   }));
 
-  const eligible = participants.filter(
-    (p) => p.online && (!p.isSpectator || room.allowSpectatorVote),
-  ).length;
+  // Everyone with a seat, online or not — the same people auto-reveal waits for.
+  const eligible = participants.filter((p) => !p.isSpectator || room.allowSpectatorVote).length;
 
   const viewer = viewerClientId
     ? room.participants.find((p) => p.clientId === viewerClientId)
@@ -213,8 +227,14 @@ export async function getRoomState(
 }
 
 /**
- * Reveal the round when every eligible, currently-online participant has voted.
+ * Reveal the round when everyone with a seat has voted.
  * Returns true when it flipped the round, so the caller knows to re-read state.
+ *
+ * A seat, not "online": a tab in the background stops pinging to save server
+ * time, and someone thinking in another tab must not have the cards flipped
+ * without their vote. Whoever has really left is dropped after
+ * ABSENT_DROP_MS by `dropAbsent`, after which the heartbeat route re-checks
+ * with `autoRevealCurrentRound`; until then the room admin can reveal by hand.
  */
 export async function maybeAutoReveal(roomId: string, roundId: string): Promise<boolean> {
   const room = await prisma.room.findUnique({
@@ -223,17 +243,11 @@ export async function maybeAutoReveal(roomId: string, roundId: string): Promise<
   });
   if (!room?.autoReveal) return false;
 
-  const cutoff = new Date(Date.now() - ONLINE_WINDOW_MS);
-  const eligible = await prisma.participant.count({
-    where: {
-      roomId,
-      lastSeenAt: { gte: cutoff },
-      ...(room.allowSpectatorVote ? {} : { isSpectator: false }),
-    },
-  });
+  const seat = room.allowSpectatorVote ? {} : { isSpectator: false };
+  const eligible = await prisma.participant.count({ where: { roomId, ...seat } });
   if (eligible === 0) return false;
 
-  const voted = await prisma.vote.count({ where: { roundId } });
+  const voted = await prisma.vote.count({ where: { roundId, participant: seat } });
   if (voted < eligible) return false;
 
   await prisma.round.update({

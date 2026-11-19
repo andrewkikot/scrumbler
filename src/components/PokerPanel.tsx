@@ -5,6 +5,7 @@ import { Hand } from '@/components/Hand';
 import { Results } from '@/components/Results';
 import { Table } from '@/components/Table';
 import type { RoomController } from '@/hooks/useRoom';
+import { describeMissing, waitingFor } from '@/lib/waiting';
 
 export function PokerPanel({ room }: { room: RoomController }) {
   const { state, isAdmin, me } = room;
@@ -28,9 +29,10 @@ export function PokerPanel({ room }: { room: RoomController }) {
           : null;
 
   const votedCount = state.participants.filter((p) => p.hasVoted).length;
-  const playerCount = state.participants.filter(
-    (p) => !p.isSpectator || state.settings.allowSpectatorVote,
-  ).length;
+  const waiting = waitingFor(state.participants, state.settings.allowSpectatorVote);
+  const playerCount = waiting.players;
+  // Once somebody has voted, say who the round is still waiting on.
+  const showWaiting = !state.round.revealed && waiting.voted > 0 && waiting.missing.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -89,7 +91,11 @@ export function PokerPanel({ room }: { room: RoomController }) {
                 onClick={() => void room.round(state.round.revealed ? 'hide' : 'reveal')}
                 disabled={!state.round.revealed && votedCount === 0}
               >
-                {state.round.revealed ? 'Hide cards' : 'Reveal cards'}
+                {state.round.revealed
+                  ? 'Hide cards'
+                  : showWaiting && waiting.onlyAway
+                    ? 'Reveal now'
+                    : 'Reveal cards'}
               </button>
               <button type="button" className="px-btn" onClick={() => void room.round('clear')}>
                 Clear votes
@@ -104,6 +110,16 @@ export function PokerPanel({ room }: { room: RoomController }) {
             </>
           )}
         </div>
+
+        {showWaiting && (
+          <p className="w-full text-[13px] text-[color:var(--color-ink-dim)]">
+            Waiting for {describeMissing(waiting.missing)}
+            {waiting.onlyAway &&
+              (isAdmin
+                ? ' — everyone here has voted, so you can reveal now.'
+                : ' — the admin can reveal without them.')}
+          </p>
+        )}
       </section>
 
       <Table

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { json, notFound, readBody, route } from '@/lib/api';
 import { prisma } from '@/lib/db';
-import { bumpAndPublish, dropAbsent, findRoom } from '@/lib/room';
+import { autoRevealCurrentRound, bumpAndPublish, dropAbsent, findRoom } from '@/lib/room';
 import { kickedAt, rejectOutdatedHeartbeat } from '@/lib/stream-protocol';
 import { ONLINE_WINDOW_MS } from '@/lib/types';
 
@@ -47,6 +47,8 @@ export const POST = route(async (request: Request, { params }: Ctx) => {
   if (kick !== null) return json({ kicked: true, at: kick });
 
   const dropped = await dropAbsent(room.id);
+  // Someone long gone just lost their seat; theirs may have been the missing vote.
+  if (dropped > 0) await autoRevealCurrentRound(room.id);
 
   const participant = await prisma.participant.findUnique({
     where: { roomId_clientId: { roomId: room.id, clientId: body.data.clientId } },
