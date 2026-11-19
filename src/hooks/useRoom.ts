@@ -9,11 +9,11 @@ import {
   setParticipantId as persistParticipantId,
 } from '@/lib/client';
 import { onClient, onServer, snapshot, subscribe } from '@/lib/store';
-import { STREAM_PROTOCOL, STREAM_PROTOCOL_PARAM } from '@/lib/stream-protocol';
+import { SINCE_PARAM, STREAM_PROTOCOL, STREAM_PROTOCOL_PARAM } from '@/lib/stream-protocol';
 import type { TimerAction } from '@/lib/timer';
 import type { ParticipantView, RoomState } from '@/lib/types';
 
-export type Connection = 'connecting' | 'live' | 'dropped' | 'paused' | 'gone';
+export type Connection = 'connecting' | 'live' | 'dropped' | 'paused' | 'kicked' | 'gone';
 
 /** Presence ping cadence. Comfortably inside ONLINE_WINDOW_MS (45s). */
 const HEARTBEAT_MS = 18_000;
@@ -34,6 +34,8 @@ export type RoomController = {
   connection: Connection;
   /** Reopen the live stream after it paused for being idle. */
   resume: () => void;
+  /** Start a new session after the super admin disconnected this room. */
+  reconnect: () => void;
   /** False until localStorage has been read, so the UI never flashes a join form. */
   ready: boolean;
   isAdmin: boolean;
@@ -96,6 +98,27 @@ function useRoomStream(initial: RoomState, path: string, identify: boolean) {
   /** A running timer counts as activity until it ends. */
   const timerEndsRef = useRef<number | null>(initial.timer?.endsAt ?? null);
 
+  // ---- the super admin's disconnect ---------------------------------------
+  /** Server time this session began; a disconnect after it stops this tab. */
+  const sinceRef = useRef(initial.serverNow);
+  const kickedAtRef = useRef(0);
+  const [kicked, setKicked] = useState(false);
+
+  const getSince = useCallback(() => sinceRef.current, []);
+
+  const kick = useCallback((at: number) => {
+    kickedAtRef.current = Math.max(kickedAtRef.current, at);
+    setKicked(true);
+  }, []);
+
+  /** Start a new session after a disconnect. Only the Reconnect button does this. */
+  const reconnect = useCallback(() => {
+    sinceRef.current = Math.max(sinceRef.current, kickedAtRef.current);
+    lastActivityRef.current = Date.now();
+    setKicked(false);
+    setConnection((current) => (current === 'gone' ? current : 'connecting'));
+  }, []);
+
   const applyState = useCallback((next: RoomState) => {
     if (next.version < versionRef.current) return;
     if (next.version > versionRef.current) lastActivityRef.current = Date.now();
@@ -148,13 +171,16 @@ function useRoomStream(initial: RoomState, path: string, identify: boolean) {
     };
   }, [resume]);
 
-  const streaming = visible && !idle && connection !== 'gone';
+  const streaming = visible && !idle && !kicked && connection !== 'gone';
 
   // ---- the push channel ---------------------------------------------------
   useEffect(() => {
     if (!streaming) return;
 
-    const query = new URLSearchParams({ [STREAM_PROTOCOL_PARAM]: STREAM_PROTOCOL });
+    const query = new URLSearchParams({
+      [STREAM_PROTOCOL_PARAM]: STREAM_PROTOCOL,
+      [SINCE_PARAM]: String(sinceRef.current),
+    });
     if (identify) query.set('clientId', getClientId());
     const source = new EventSource(`${path}?${query}`);
     let closedByUs = false;
@@ -176,6 +202,19 @@ function useRoomStream(initial: RoomState, path: string, identify: boolean) {
       source.close();
     });
 
+    // The super admin disconnected this room. Stay closed until Reconnect.
+    source.addEventListener('kicked', (event) => {
+      closedByUs = true;
+      source.close();
+      let at = Date.now();
+      try {
+        at = (JSON.parse((event as MessageEvent<string>).data) as { at: number }).at;
+      } catch {
+        /* the stop matters, not the timestamp */
+      }
+      kick(at);
+    });
+
     // EventSource reconnects on its own (the server sends `retry: 2000`);
     // we only reflect the gap in the UI.
     source.addEventListener('error', () => {
@@ -186,14 +225,22 @@ function useRoomStream(initial: RoomState, path: string, identify: boolean) {
       closedByUs = true;
       source.close();
     };
-  }, [path, identify, applyState, streaming]);
+  }, [path, identify, applyState, streaming, kick]);
+
+  const shown: Connection =
+    connection === 'gone' ? 'gone' : kicked ? 'kicked' : !streaming ? 'paused' : connection;
 
   return {
     state,
-    connection: connection !== 'gone' && !streaming ? ('paused' as const) : connection,
+    connection: shown,
     clockOffset,
     applyState,
     resume,
+    reconnect,
+    /** True while the tab may stream and ping. */
+    active: streaming,
+    getSince,
+    kick,
   };
 }
 
@@ -206,11 +253,8 @@ function useRoomStream(initial: RoomState, path: string, identify: boolean) {
  * WebSockets later is a change to this file alone.
  */
 export function useRoom(slug: string, initial: RoomState): RoomController {
-  const { state, connection, clockOffset, applyState, resume } = useRoomStream(
-    initial,
-    `/api/rooms/${slug}/stream`,
-    true,
-  );
+  const { state, connection, clockOffset, applyState, resume, reconnect, active, getSince, kick } =
+    useRoomStream(initial, `/api/rooms/${slug}/stream`, true);
   const [error, setError] = useState<string | null>(null);
   // Read straight from localStorage rather than copying it into state in an
   // effect — this also keeps two tabs of the same room in step.
@@ -230,13 +274,27 @@ export function useRoom(slug: string, initial: RoomState): RoomController {
   const rememberSeat = useCallback((id: string) => persistParticipantId(slug, id), [slug]);
 
   // ---- presence -----------------------------------------------------------
+  // Pings only while the stream may be open: a hidden, idle or disconnected tab
+  // stays quiet, so it neither keeps a function busy nor wakes the database.
+  // Coming back re-runs this effect, which pings at once.
   useEffect(() => {
+    if (!active) return;
+
     const ping = async () => {
       try {
-        const result = await api<{ known: boolean; participantId: string | null }>(
-          `/api/rooms/${slug}/heartbeat`,
-          { method: 'POST', body: { clientId: getClientId() } },
-        );
+        const result = await api<{
+          known?: boolean;
+          participantId?: string | null;
+          kicked?: boolean;
+          at?: number;
+        }>(`/api/rooms/${slug}/heartbeat`, {
+          method: 'POST',
+          body: { clientId: getClientId(), v: STREAM_PROTOCOL, since: getSince() },
+        });
+        if (result.kicked) {
+          kick(result.at ?? Date.now());
+          return;
+        }
         // Recovers your seat after a refresh, or after an admin kicked and you
         // re-joined from another tab.
         if (result.participantId) rememberSeat(result.participantId);
@@ -247,16 +305,8 @@ export function useRoom(slug: string, initial: RoomState): RoomController {
 
     void ping();
     const timer = setInterval(() => void ping(), HEARTBEAT_MS);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void ping();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [slug, rememberSeat]);
+    return () => clearInterval(timer);
+  }, [slug, rememberSeat, active, getSince, kick]);
 
   const run = useCallback(
     async (work: () => Promise<RoomState | undefined>) => {
@@ -388,6 +438,7 @@ export function useRoom(slug: string, initial: RoomState): RoomController {
     state,
     connection,
     resume,
+    reconnect,
     ready,
     isAdmin: Boolean(adminToken),
     readOnly: false,
@@ -408,7 +459,7 @@ const nothing = async () => {};
  * write routes live under — so these are no-ops rather than requests.
  */
 export function useWatchedRoom(token: string, initial: RoomState): RoomController {
-  const { state, connection, clockOffset, resume } = useRoomStream(
+  const { state, connection, clockOffset, resume, reconnect } = useRoomStream(
     initial,
     `/api/watch/${encodeURIComponent(token)}/stream`,
     false,
@@ -417,6 +468,7 @@ export function useWatchedRoom(token: string, initial: RoomState): RoomControlle
     state,
     connection,
     resume,
+    reconnect,
     ready: true,
     isAdmin: false,
     readOnly: true,

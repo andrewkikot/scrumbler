@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { DisconnectedNotice } from '@/components/DisconnectedNotice';
 import { Mark } from '@/components/Mark';
 import { PokerPanel } from '@/components/PokerPanel';
 import { TimerBar } from '@/components/TimerBar';
@@ -16,6 +17,7 @@ const CONNECTION_COPY: Record<Connection, { text: string; color: string }> = {
   live: { text: 'Live', color: 'var(--color-lime)' },
   dropped: { text: 'Reconnecting', color: 'var(--color-gold)' },
   paused: { text: 'Paused · click to resume', color: 'var(--color-ink-dim)' },
+  kicked: { text: 'Disconnected', color: 'var(--color-ink-dim)' },
   gone: { text: 'Link closed', color: 'var(--color-rose)' },
 };
 
@@ -43,6 +45,8 @@ export function WatchClient({ token, initialState }: { token: string; initialSta
       </main>
     );
   }
+
+  if (room.connection === 'kicked') return <DisconnectedNotice onReconnect={room.reconnect} />;
 
   const status = CONNECTION_COPY[room.connection];
 

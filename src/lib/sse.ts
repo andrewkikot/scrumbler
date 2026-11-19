@@ -1,4 +1,6 @@
 import { waitForChange } from './bus';
+import type { VersionMark } from './room';
+import { kickedAt, type StreamClient } from './stream-protocol';
 import type { RoomState } from './types';
 
 /** How long a connection lives before we hand it back for a clean reconnect. */
@@ -12,8 +14,10 @@ type StreamSource = {
   /** The bus channel to park on — always the room's slug, even for watchers. */
   channel: string;
   /** One tiny read per tick; null means the room (or this link to it) is gone. */
-  readVersion: () => Promise<number | null>;
+  readVersion: () => Promise<VersionMark | null>;
   readState: () => Promise<RoomState | null>;
+  /** Who is asking, and since when — for the super admin's disconnect. */
+  client: StreamClient;
 };
 
 /**
@@ -34,6 +38,13 @@ type StreamSource = {
  * they find the room and how much of it they may see.
  */
 export function roomStream(request: Request, initial: RoomState, source: StreamSource): Response {
+  const { client } = source;
+  // A disconnected tab that cannot read a `kicked` frame would just reconnect,
+  // so it gets the 204 that stops EventSource for good.
+  if (!client.kickAware && kickedAt(initial.disconnectedAt, client.since) !== null) {
+    return new Response(null, { status: 204 });
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -53,6 +64,17 @@ export function roomStream(request: Request, initial: RoomState, source: StreamS
 
       // Tell EventSource how fast to come back after we close.
       write('retry: 2000\n\n');
+
+      // Only a kick-aware client reaches here while disconnected: tell it, and
+      // it closes the stream and stops pinging until someone clicks Reconnect.
+      const initialKick = kickedAt(initial.disconnectedAt, client.since);
+      if (initialKick !== null) {
+        send('kicked', { at: initialKick });
+        open = false;
+        controller.close();
+        return;
+      }
+
       send('state', initial);
 
       let lastVersion = initial.version;
@@ -64,14 +86,21 @@ export function roomStream(request: Request, initial: RoomState, source: StreamS
           await waitForChange(source.channel, POLL_MS, request.signal);
           if (request.signal.aborted) break;
 
-          const version = await source.readVersion();
+          const mark = await source.readVersion();
 
-          if (version === null) {
+          if (mark === null) {
             send('gone', {});
             break;
           }
 
-          if (version !== lastVersion) {
+          const kick = kickedAt(mark.disconnectedAt, client.since);
+          if (kick !== null) {
+            // An older client just reconnects, and meets the 204 up top.
+            if (client.kickAware) send('kicked', { at: kick });
+            break;
+          }
+
+          if (mark.version !== lastVersion) {
             const state = await source.readState();
             if (state) {
               lastVersion = state.version;

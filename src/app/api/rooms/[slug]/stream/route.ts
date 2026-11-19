@@ -1,6 +1,6 @@
 import { getRoomState, getRoomVersion } from '@/lib/room';
 import { roomStream } from '@/lib/sse';
-import { rejectOutdatedClient } from '@/lib/stream-protocol';
+import { readStreamClient } from '@/lib/stream-protocol';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,8 +12,8 @@ type Ctx = { params: Promise<{ slug: string }> };
 /** GET /api/rooms/:slug/stream — Server-Sent Events. See `roomStream`. */
 export async function GET(request: Request, { params }: Ctx) {
   // Before any database read: an old tab should cost as little as possible.
-  const outdated = rejectOutdatedClient(request);
-  if (outdated) return outdated;
+  const client = readStreamClient(request);
+  if (client instanceof Response) return client;
 
   const { slug } = await params;
   // EventSource cannot set headers, so the viewer identifies itself in the URL.
@@ -27,5 +27,6 @@ export async function GET(request: Request, { params }: Ctx) {
     channel: slug,
     readVersion: () => getRoomVersion(slug),
     readState: () => getRoomState(slug, viewer),
+    client,
   });
 }

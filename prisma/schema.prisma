@@ -76,6 +76,12 @@ model Room {
   /// single column so a poll costs one tiny indexed read.
   version Int @default(0)
 
+  /// Set by the super admin's "Disconnect". A tab whose session began before
+  /// this stops streaming and pinging until someone in it clicks Reconnect.
+  /// Written with raw SQL so it never moves `updatedAt`, which the idle-room
+  /// cleanup reads as "last used".
+  disconnectedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

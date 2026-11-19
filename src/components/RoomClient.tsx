@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { AdminSettings } from '@/components/AdminSettings';
+import { DisconnectedNotice } from '@/components/DisconnectedNotice';
 import { JoinGate } from '@/components/JoinGate';
 import { Mark } from '@/components/Mark';
 import { PokerPanel } from '@/components/PokerPanel';
@@ -20,6 +21,7 @@ const CONNECTION_COPY: Record<Connection, { text: string; color: string }> = {
   live: { text: 'Live', color: 'var(--color-lime)' },
   dropped: { text: 'Reconnecting', color: 'var(--color-gold)' },
   paused: { text: 'Paused · click to resume', color: 'var(--color-ink-dim)' },
+  kicked: { text: 'Disconnected', color: 'var(--color-ink-dim)' },
   gone: { text: 'Room deleted', color: 'var(--color-rose)' },
 };
 
@@ -69,6 +71,8 @@ export function RoomClient({ slug, initialState }: { slug: string; initialState:
       </main>
     );
   }
+
+  if (room.connection === 'kicked') return <DisconnectedNotice onReconnect={room.reconnect} />;
 
   const status = CONNECTION_COPY[room.connection];
   const tabs: { id: Tab; label: string }[] = [

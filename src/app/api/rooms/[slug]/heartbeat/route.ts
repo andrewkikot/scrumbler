@@ -2,13 +2,20 @@ import { z } from 'zod';
 import { json, notFound, readBody, route } from '@/lib/api';
 import { prisma } from '@/lib/db';
 import { bumpAndPublish, dropAbsent, findRoom } from '@/lib/room';
+import { kickedAt, rejectOutdatedHeartbeat } from '@/lib/stream-protocol';
 import { ONLINE_WINDOW_MS } from '@/lib/types';
 
 export const runtime = 'nodejs';
 
 type Ctx = { params: Promise<{ slug: string }> };
 
-const Heartbeat = z.object({ clientId: z.string().min(8).max(64) });
+const Heartbeat = z.object({
+  clientId: z.string().min(8).max(64),
+  /** Absent on tabs too old to be told to stop. See stream-protocol. */
+  v: z.string().max(8).optional(),
+  /** Server time this tab's session began. */
+  since: z.number().nonnegative().optional(),
+});
 
 /**
  * POST /api/rooms/:slug/heartbeat — presence ping.
@@ -23,12 +30,21 @@ const Heartbeat = z.object({ clientId: z.string().min(8).max(64) });
  * room. It gets `known: false` and the join form, with its name filled in.
  */
 export const POST = route(async (request: Request, { params }: Ctx) => {
+  const body = await readBody(request, Heartbeat);
+  if (!body.ok) return body.response;
+
+  // An old tab pings every 18s forever and ignores the answer. Answer before
+  // touching the database, so it costs next to nothing and lets Neon sleep.
+  const outdated = rejectOutdatedHeartbeat(body.data);
+  if (outdated) return outdated;
+
   const { slug } = await params;
   const room = await findRoom(slug);
   if (!room) return notFound();
 
-  const body = await readBody(request, Heartbeat);
-  if (!body.ok) return body.response;
+  // Disconnected by the super admin: say so, and leave presence alone.
+  const kick = kickedAt(room.disconnectedAt?.getTime() ?? null, body.data.since ?? 0);
+  if (kick !== null) return json({ kicked: true, at: kick });
 
   const dropped = await dropAbsent(room.id);
 

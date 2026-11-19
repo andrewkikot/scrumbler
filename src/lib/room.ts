@@ -7,10 +7,19 @@ import { computeStats } from './stats';
 import { timerView } from './timer';
 import { ABSENT_DROP_MS, ONLINE_WINDOW_MS, SPIN_HISTORY_LIMIT, type RoomState } from './types';
 
-/** Cheap single-column read used by the SSE loop on every poll tick. */
-export async function getRoomVersion(slug: string): Promise<number | null> {
-  const row = await prisma.room.findUnique({ where: { slug }, select: { version: true } });
-  return row?.version ?? null;
+/** What the SSE loop re-reads every tick: a change, or a disconnect. */
+export type VersionMark = { version: number; disconnectedAt: number | null };
+
+const toMark = (row: { version: number; disconnectedAt: Date | null } | null): VersionMark | null =>
+  row && { version: row.version, disconnectedAt: row.disconnectedAt?.getTime() ?? null };
+
+/** Cheap two-column read used by the SSE loop on every poll tick. */
+export async function getRoomVersion(slug: string): Promise<VersionMark | null> {
+  const row = await prisma.room.findUnique({
+    where: { slug },
+    select: { version: true, disconnectedAt: true },
+  });
+  return toMark(row);
 }
 
 export async function findRoom(slug: string) {
@@ -19,13 +28,31 @@ export async function findRoom(slug: string) {
 
 /** The watch link's lookup. Returns only what a watcher's routes may use. */
 export async function findWatchedRoom(watchToken: string) {
-  return prisma.room.findUnique({ where: { watchToken }, select: { slug: true, version: true } });
+  return prisma.room.findUnique({
+    where: { watchToken },
+    select: { slug: true, version: true, disconnectedAt: true },
+  });
 }
 
 /** Cheap poll for the watch stream; null once the room or the link is gone. */
-export async function getWatchVersion(watchToken: string): Promise<number | null> {
-  const row = await findWatchedRoom(watchToken);
-  return row?.version ?? null;
+export async function getWatchVersion(watchToken: string): Promise<VersionMark | null> {
+  return toMark(await findWatchedRoom(watchToken));
+}
+
+/**
+ * Disconnect every tab whose session began before now, in the named rooms or
+ * in all of them. Raw SQL so `updatedAt` stays put: the idle-room cleanup reads
+ * it as "last used", and disconnecting a forgotten room must not make it look
+ * used. `version` stays put too — streams see the change on their next tick.
+ */
+export async function disconnectRooms(slugs: string[] | null, now = new Date()): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ slug: string }[]>`
+    UPDATE "Room" SET "disconnectedAt" = ${now}
+    ${slugs ? Prisma.sql`WHERE "slug" IN (${Prisma.join(slugs)})` : Prisma.empty}
+    RETURNING "slug"`;
+  const touched = rows.map((row) => row.slug);
+  for (const slug of touched) publish(slug);
+  return touched;
 }
 
 /**
@@ -180,6 +207,7 @@ export async function getRoomState(
       createdAt: s.createdAt.toISOString(),
     })),
     timer: timerView(room),
+    disconnectedAt: room.disconnectedAt?.getTime() ?? null,
     serverNow: now,
   };
 }

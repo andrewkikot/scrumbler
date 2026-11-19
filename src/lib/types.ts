@@ -84,6 +84,11 @@ export type RoomState = {
   /** The shared discussion timer; null when nobody has one running. */
   timer: TimerView | null;
   /**
+   * When the super admin last disconnected this room's tabs (server ms), or
+   * null. A tab whose session began before it is told to stop.
+   */
+  disconnectedAt: number | null;
+  /**
    * The server's clock when this snapshot was built. Lets each client correct
    * for its own clock being off, so every screen hits 0:00 together.
    */

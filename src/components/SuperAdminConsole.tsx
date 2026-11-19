@@ -175,6 +175,8 @@ export function SuperAdminConsole() {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   /** Which delete is waiting on a second click: one slug, or the whole selection. */
   const [confirming, setConfirming] = useState<'selection' | string | null>(null);
+  /** "Disconnect every room" waits on a second click too. */
+  const [confirmingAll, setConfirmingAll] = useState(false);
 
   // The applied query, kept apart from what is being typed: the list reloads
   // when these change, and nobody wants a request per keystroke.
@@ -309,6 +311,33 @@ export function SuperAdminConsole() {
     }
   };
 
+  /**
+   * Close every open tab in these rooms, or in all rooms when `slugs` is null.
+   * Nothing is deleted, so it needs no confirmation for named rooms.
+   */
+  const runDisconnect = async (slugs: string[] | null) => {
+    if (busy || slugs?.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await adminFetch<{ disconnected: number }>('/api/admin/disconnect', key ?? '', {
+        method: 'POST',
+        body: slugs ? { slugs } : {},
+      });
+      setNotice(
+        slugs?.length === 1
+          ? `Disconnected the tabs in ${slugs[0]}.`
+          : `Disconnected the tabs in ${plural(result.disconnected, 'room')}.`,
+      );
+      setConfirmingAll(false);
+    } catch (cause) {
+      if (cause instanceof AdminError && cause.status === 403) setSuperAdminKey(null);
+      setError(cause instanceof Error ? cause.message : 'Could not disconnect');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!ready) return <p className="p-8 text-[color:var(--color-ink-dim)]">Loading…</p>;
   if (!key) return <KeyGate error={error} onSubmit={(next) => setSuperAdminKey(next)} />;
 
@@ -414,6 +443,43 @@ export function SuperAdminConsole() {
         >
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
+
+        {confirmingAll ? (
+          <>
+            <button
+              type="button"
+              className="px-btn px-btn-sm px-btn-danger"
+              disabled={busy}
+              onClick={() => void runDisconnect(null)}
+            >
+              {busy ? 'Disconnecting…' : 'Yes, disconnect every room'}
+            </button>
+            <button type="button" className="px-btn px-btn-sm" onClick={() => setConfirmingAll(false)}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="px-btn px-btn-sm"
+            disabled={busy}
+            title="Close every open tab in every room. Nothing is deleted; people click Reconnect."
+            onClick={() => setConfirmingAll(true)}
+          >
+            Disconnect all rooms
+          </button>
+        )}
+
+        {marked.length > 0 && confirming !== 'selection' && (
+          <button
+            type="button"
+            className="px-btn px-btn-sm"
+            disabled={busy}
+            onClick={() => void runDisconnect(marked.slice(0, ADMIN_DELETE_LIMIT))}
+          >
+            Disconnect {marked.length} selected
+          </button>
+        )}
 
         {marked.length > 0 &&
           (confirming === 'selection' ? (
@@ -598,13 +664,24 @@ export function SuperAdminConsole() {
                         </button>
                       </span>
                     ) : (
-                      <button
-                        type="button"
-                        className="px-btn px-btn-sm px-btn-danger"
-                        onClick={() => setConfirming(room.slug)}
-                      >
-                        Delete
-                      </button>
+                      <span className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="px-btn px-btn-sm"
+                          disabled={busy}
+                          title="Close every open tab in this room. Nothing is deleted."
+                          onClick={() => void runDisconnect([room.slug])}
+                        >
+                          Disconnect
+                        </button>
+                        <button
+                          type="button"
+                          className="px-btn px-btn-sm px-btn-danger"
+                          onClick={() => setConfirming(room.slug)}
+                        >
+                          Delete
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>
