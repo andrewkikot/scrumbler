@@ -1,5 +1,6 @@
 import { findWatchedRoom, getWatchState, getWatchVersion } from '@/lib/room';
 import { roomStream } from '@/lib/sse';
+import { rejectOutdatedClient } from '@/lib/stream-protocol';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,6 +16,10 @@ type Ctx = { params: Promise<{ token: string }> };
  * as if the room had been deleted.
  */
 export async function GET(request: Request, { params }: Ctx) {
+  // Before any database read: an old tab should cost as little as possible.
+  const outdated = rejectOutdatedClient(request);
+  if (outdated) return outdated;
+
   const { token } = await params;
   const room = await findWatchedRoom(token);
   const initial = room && (await getWatchState(token));

@@ -9,6 +9,7 @@ import {
   setParticipantId as persistParticipantId,
 } from '@/lib/client';
 import { onClient, onServer, snapshot, subscribe } from '@/lib/store';
+import { STREAM_PROTOCOL, STREAM_PROTOCOL_PARAM } from '@/lib/stream-protocol';
 import type { TimerAction } from '@/lib/timer';
 import type { ParticipantView, RoomState } from '@/lib/types';
 
@@ -153,9 +154,9 @@ function useRoomStream(initial: RoomState, path: string, identify: boolean) {
   useEffect(() => {
     if (!streaming) return;
 
-    const source = new EventSource(
-      identify ? `${path}?clientId=${encodeURIComponent(getClientId())}` : path,
-    );
+    const query = new URLSearchParams({ [STREAM_PROTOCOL_PARAM]: STREAM_PROTOCOL });
+    if (identify) query.set('clientId', getClientId());
+    const source = new EventSource(`${path}?${query}`);
     let closedByUs = false;
 
     source.addEventListener('open', () => setConnection('live'));
