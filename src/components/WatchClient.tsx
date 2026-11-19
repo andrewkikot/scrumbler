@@ -15,6 +15,7 @@ const CONNECTION_COPY: Record<Connection, { text: string; color: string }> = {
   connecting: { text: 'Connecting', color: 'var(--color-ink-dim)' },
   live: { text: 'Live', color: 'var(--color-lime)' },
   dropped: { text: 'Reconnecting', color: 'var(--color-gold)' },
+  paused: { text: 'Paused · click to resume', color: 'var(--color-ink-dim)' },
   gone: { text: 'Link closed', color: 'var(--color-rose)' },
 };
 
@@ -68,7 +69,7 @@ export function WatchClient({ token, initialState }: { token: string; initialSta
           <span className="px-chip" style={{ color: status.color }}>
             <span
               aria-hidden
-              className={room.connection === 'live' ? '' : 'px-blink'}
+              className={room.connection === 'live' || room.connection === 'paused' ? '' : 'px-blink'}
               style={{ width: 8, height: 8, background: status.color, display: 'inline-block' }}
             />
             {status.text}

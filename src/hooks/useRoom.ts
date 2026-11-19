@@ -12,14 +12,27 @@ import { onClient, onServer, snapshot, subscribe } from '@/lib/store';
 import type { TimerAction } from '@/lib/timer';
 import type { ParticipantView, RoomState } from '@/lib/types';
 
-export type Connection = 'connecting' | 'live' | 'dropped' | 'gone';
+export type Connection = 'connecting' | 'live' | 'dropped' | 'paused' | 'gone';
 
 /** Presence ping cadence. Comfortably inside ONLINE_WINDOW_MS (45s). */
 const HEARTBEAT_MS = 18_000;
 
+/**
+ * An open stream keeps a Vercel function running the whole time, whether or
+ * not anything happens, and that runtime is what the plan bills. So the stream
+ * only stays up while someone could be looking: it drops when the tab is
+ * hidden, and after this long with no change in the room and no input here.
+ */
+const IDLE_MS = 10 * 60_000;
+const IDLE_CHECK_MS = 30_000;
+
+const isVisible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
+
 export type RoomController = {
   state: RoomState;
   connection: Connection;
+  /** Reopen the live stream after it paused for being idle. */
+  resume: () => void;
   /** False until localStorage has been read, so the UI never flashes a join form. */
   ready: boolean;
   isAdmin: boolean;
@@ -73,15 +86,73 @@ function useRoomStream(initial: RoomState, path: string, identify: boolean) {
   // Guards against a slow POST response overwriting a newer SSE frame.
   const versionRef = useRef(initial.version);
 
+  // ---- when the stream may stay open --------------------------------------
+  const [visible, setVisible] = useState(isVisible);
+  const [idle, setIdle] = useState(false);
+  const idleRef = useRef(false);
+  /** Last room change or local input; the idle clock counts from here. */
+  const lastActivityRef = useRef(0);
+  /** A running timer counts as activity until it ends. */
+  const timerEndsRef = useRef<number | null>(initial.timer?.endsAt ?? null);
+
   const applyState = useCallback((next: RoomState) => {
     if (next.version < versionRef.current) return;
+    if (next.version > versionRef.current) lastActivityRef.current = Date.now();
     versionRef.current = next.version;
+    timerEndsRef.current = next.timer?.endsAt ?? null;
     setState(next);
     setClockOffset(next.serverNow - Date.now());
   }, []);
 
+  /** Reopen an idle stream. Any click or key press here does this too. */
+  const resume = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    if (!idleRef.current) return;
+    idleRef.current = false;
+    setIdle(false);
+    setConnection((current) => (current === 'gone' ? current : 'connecting'));
+  }, []);
+
+  useEffect(() => {
+    lastActivityRef.current = Date.now();
+
+    const onVisibility = () => {
+      const now = isVisible();
+      if (now) {
+        // Coming back is activity: don't let the idle clock close it at once.
+        lastActivityRef.current = Date.now();
+        idleRef.current = false;
+        setIdle(false);
+        setConnection((current) => (current === 'gone' ? current : 'connecting'));
+      }
+      setVisible(now);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pointerdown', resume);
+    window.addEventListener('keydown', resume);
+
+    const check = setInterval(() => {
+      const busyUntil = Math.max(lastActivityRef.current, timerEndsRef.current ?? 0);
+      if (!idleRef.current && Date.now() - busyUntil > IDLE_MS) {
+        idleRef.current = true;
+        setIdle(true);
+      }
+    }, IDLE_CHECK_MS);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pointerdown', resume);
+      window.removeEventListener('keydown', resume);
+      clearInterval(check);
+    };
+  }, [resume]);
+
+  const streaming = visible && !idle && connection !== 'gone';
+
   // ---- the push channel ---------------------------------------------------
   useEffect(() => {
+    if (!streaming) return;
+
     const source = new EventSource(
       identify ? `${path}?clientId=${encodeURIComponent(getClientId())}` : path,
     );
@@ -114,9 +185,15 @@ function useRoomStream(initial: RoomState, path: string, identify: boolean) {
       closedByUs = true;
       source.close();
     };
-  }, [path, identify, applyState]);
+  }, [path, identify, applyState, streaming]);
 
-  return { state, connection, clockOffset, applyState };
+  return {
+    state,
+    connection: connection !== 'gone' && !streaming ? ('paused' as const) : connection,
+    clockOffset,
+    applyState,
+    resume,
+  };
 }
 
 /**
@@ -128,7 +205,7 @@ function useRoomStream(initial: RoomState, path: string, identify: boolean) {
  * WebSockets later is a change to this file alone.
  */
 export function useRoom(slug: string, initial: RoomState): RoomController {
-  const { state, connection, clockOffset, applyState } = useRoomStream(
+  const { state, connection, clockOffset, applyState, resume } = useRoomStream(
     initial,
     `/api/rooms/${slug}/stream`,
     true,
@@ -309,6 +386,7 @@ export function useRoom(slug: string, initial: RoomState): RoomController {
   return {
     state,
     connection,
+    resume,
     ready,
     isAdmin: Boolean(adminToken),
     readOnly: false,
@@ -329,7 +407,7 @@ const nothing = async () => {};
  * write routes live under — so these are no-ops rather than requests.
  */
 export function useWatchedRoom(token: string, initial: RoomState): RoomController {
-  const { state, connection, clockOffset } = useRoomStream(
+  const { state, connection, clockOffset, resume } = useRoomStream(
     initial,
     `/api/watch/${encodeURIComponent(token)}/stream`,
     false,
@@ -337,6 +415,7 @@ export function useWatchedRoom(token: string, initial: RoomState): RoomControlle
   return {
     state,
     connection,
+    resume,
     ready: true,
     isAdmin: false,
     readOnly: true,
